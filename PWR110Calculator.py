@@ -155,7 +155,13 @@ with col1:
     st.write(f"Calculated Safe Pressure (Ps): **{P_safe_bar:.2f} bar**")
     st.markdown("---")
     st.write(f"Min Thickness Required: **{t_min:.2f} mm**")
-    st.markdown(f"Final Layers: <span class='big-font'>{n_layers}</span>", unsafe_allow_html=True)
+    
+    # Conditional Note for Layer Count
+    layer_note = ""
+    if n_layers <= 2:
+        layer_note = "<br><span style='font-size:0.8em; color: #D35400;'>⚠️ Prowrap recommends 3 layers according to ISO 24817</span>"
+        
+    st.markdown(f"Final Layers: <span class='big-font'>{n_layers}</span>{layer_note}", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col2:
