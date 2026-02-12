@@ -36,7 +36,7 @@ repair_type = st.sidebar.radio("Repair Type", ["Type A (Non-leaking)", "Type B (
 # --- MATERIAL PROPERTIES (Prowrap 110) ---
 material_data = {
     "Name": "Prowrap 110",
-    # Short keys for formulas (lines 106, 110, 120)
+    # Short keys for formulas
     "Ec": 45460,                   # MPa - Hoop modulus
     "Ea": 43800,                   # MPa - Axial modulus
     # Descriptive keys (kept for reference)
