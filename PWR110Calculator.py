@@ -10,6 +10,7 @@ st.set_page_config(page_title="ISO 24817 Repair Calculator", page_icon="🔧", l
 st.markdown("""
     <style>
     .big-font { font-size:24px !important; font-weight: bold; color: #2E86C1; }
+    .warning-text { font-size:24px !important; font-weight: bold; color: #D35400; }
     .metric-card { background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #2E86C1; }
     .warning-card { background-color: #fff3cd; padding: 20px; border-radius: 10px; border-left: 5px solid #ffc107; }
     </style>
@@ -159,7 +160,8 @@ with col1:
     # Conditional Note for Layer Count
     layer_note = ""
     if n_layers <= 2:
-        layer_note = "<br><span style='font-size:0.8em; color: #D35400;'>⚠️ Prowrap recommends 3 layers according to ISO 24817</span>"
+        # Note: 'warning-text' class matches size (24px) but uses orange color
+        layer_note = "<br><span class='warning-text'>⚠️ Prowrap recommends 3 layers according to ISO 24817</span>"
         
     st.markdown(f"Final Layers: <span class='big-font'>{n_layers}</span>{layer_note}", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
