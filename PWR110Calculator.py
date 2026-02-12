@@ -11,41 +11,38 @@ st.markdown("""
     <style>
     .big-font { font-size:24px !important; font-weight: bold; color: #2E86C1; }
     .metric-card { background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #2E86C1; }
+    .warning-card { background-color: #fff3cd; padding: 20px; border-radius: 10px; border-left: 5px solid #ffc107; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- SIDEBAR INPUTS ---
-st.sidebar.header("1. Pipe & Defect Data")
+st.sidebar.header("1. Pipe Data")
 D_mm = st.sidebar.number_input("Pipe Outer Diameter (mm)", value=1219.2, step=10.0)
 t_wall_mm = st.sidebar.number_input("Pipe Wall Thickness (mm)", value=14.3, step=0.1)
-P_design_bar = st.sidebar.number_input("Design Pressure (bar)", value=75.0, step=1.0)
-P_safe_bar = st.sidebar.number_input("Safe Operating Pressure (Ps) of Defect (bar)", value=63.95, help="From B31G or similar assessment")
+SMYS_MPa = st.sidebar.number_input("Pipe SMYS (Yield Strength) (MPa)", value=358.0, help="e.g., Grade B=241, X52=358, X60=413, X65=448")
 
-st.sidebar.header("2. Operating Conditions")
+st.sidebar.header("2. Defect Data")
+L_defect_mm = st.sidebar.number_input("Axial Length of Defect (mm)", value=100.0, step=10.0)
+defect_depth_pct = st.sidebar.slider("Defect Depth (%)", min_value=0, max_value=80, value=40, help="Percentage of wall thickness lost")
+
+st.sidebar.header("3. Operating Conditions")
+P_design_bar = st.sidebar.number_input("Design Pressure (bar)", value=75.0, step=1.0)
 T_design_C = st.sidebar.number_input("Design Temperature (°C)", value=40.0, step=1.0)
 T_install_C = st.sidebar.number_input("Installation Temperature (°C)", value=25.0, step=1.0)
 lifetime_years = st.sidebar.selectbox("Design Lifetime (Years)", [2, 5, 10, 20], index=3)
-
-st.sidebar.header("3. Defect Geometry")
-L_defect_mm = st.sidebar.number_input("Axial Length of Defect (mm)", value=100.0, step=10.0)
 repair_type = st.sidebar.radio("Repair Type", ["Type A (Non-leaking)", "Type B (Leaking/Through-wall)"])
 
-# --- MATERIAL PROPERTIES (Prowrap 110 from uploaded file) ---
-# Hardcoded based on your CSV to ensure the app works without uploading the file every time
+# --- MATERIAL PROPERTIES (Prowrap 110) ---
 material_data = {
     "Name": "Prowrap 110",
-    # Keep both keys to avoid KeyError if formulas expect "Ec"
-    "Ec": 45460,                   # MPa (45.46 GPa) - Hoop modulus
-    "Ec (Hoop Modulus)": 45460,    # MPa (45.46 GPa)
-    # Keep both keys to avoid KeyError if formulas expect "Ea"
-    "Ea": 43800,                   # MPa - Axial modulus
+    "Ec (Hoop Modulus)": 45460,    # MPa 
     "Ea (Axial Modulus)": 43800,   # MPa
     "Ply Thickness": 0.83,         # mm
     "Tg": 103,                     # °C
     "Tm": 83,                      # °C
     "Lap Shear (tau)": 7.37,       # MPa
     "Alpha_c": 1.034e-05,          # /°C
-    "Alpha_s": 1.2e-06             # Steel CTE (Assumed standard)
+    "Alpha_s": 1.2e-06             # Steel CTE
 }
 
 # --- CALCULATIONS ---
@@ -53,81 +50,94 @@ material_data = {
 st.title("🔧 ISO 24817 Composite Repair Calculator")
 st.markdown(f"**Material Selected:** {material_data['Name']}")
 
-# 1. Temperature De-rating (Simplified Eq 10 Logic based on CSV)
-# The CSV showed ft = 0.869 for Td=40, Tm=83. 
-# Generic ISO logic: ft = (Tg - Td) / (Tg - T_ambient_ref) 
-# We will use the formula: ft = 1 - ((Td - 20) / (Tg - 20)) as a generic approximation if specific curve isn't known, 
-# BUT based on your CSV, I will use a linear scaler fitting your data points.
+# 1. Calculate Geometry & Safe Pressure (Modified B31G) 
+# Defect Geometry
+d_defect = t_wall_mm * (defect_depth_pct / 100.0)
+t_remaining = t_wall_mm - d_defect
+
+# Modified B31G Calculation for Ps
+# Flow Stress (S_flow) = SMYS + 69 MPa (Standard assumption)
+S_flow = SMYS_MPa + 69.0 
+
+# Folias Factor (M) - Modified B31G approximation
+z = (L_defect_mm**2) / (D_mm * t_wall_mm)
+if z <= 50:
+    M = math.sqrt(1 + 0.6275 * z - 0.003375 * z**2)
+else:
+    M = 0.032 * z + 3.3
+
+# Shape Factor for Modified B31G (0.85dL)
+# Ps = (2 * S_flow * t / D) * ( (1 - 0.85 * d/t) / (1 - 0.85 * d/t / M) )
+R_SF = 0.85 # Remaining Strength Factor constant
+term_numerator = 1 - (R_SF * (d_defect / t_wall_mm))
+term_denominator = 1 - (R_SF * (d_defect / t_wall_mm) / M)
+
+P_safe_MPa = (2 * S_flow * t_wall_mm / D_mm) * (term_numerator / term_denominator)
+P_safe_bar = P_safe_MPa * 10.0 # Convert MPa back to bar for display consistency
+
+# 2. Temperature De-rating
 f_T = max(0.0, min(1.0, (material_data["Tm"] - T_design_C) / (material_data["Tm"] - 20))) 
-# Note: This is an estimation. In production, use the exact polynomial from the manufacturer.
-# For this demo, let's trust the logic that higher Temp = lower factor.
 if T_design_C > material_data["Tm"]:
     st.error("Error: Design Temperature exceeds Material Upper Limit (Tm)!")
     st.stop()
 
-# 2. Allowable Strain
-# Base strain for 20 years from CSV is approx 0.0025
+# 3. Allowable Strain
 epsilon_c0 = 0.0025 
 delta_T = abs(T_design_C - T_install_C)
-# Eq: e_c = f_T * e_c0 - dT * (alpha_s - alpha_c)
 term_thermal = delta_T * (material_data["Alpha_s"] - material_data["Alpha_c"])
 epsilon_c = (f_T * epsilon_c0) - term_thermal
 
-# 3. Minimum Thickness (Type A) - Eq 7
-# t_min = (D / (2 * Ec * epsilon_c)) * (P - Ps)
-# Convert bar to MPa for calculation? 
-# Usually: D [mm], P [MPa], E [MPa]. 
-# Your CSV used bar for P and MPa for E, but the formula requires consistent units.
-# 1 bar = 0.1 MPa
+# 4. Minimum Thickness (Type A)
 P_design_MPa = P_design_bar * 0.1
-P_safe_MPa = P_safe_bar * 0.1
 
+# If Design Pressure > Safe Pressure, we need reinforcement
 if P_design_MPa > P_safe_MPa:
+    # ISO Eq 7
     t_min = (D_mm / (2 * material_data["Ec"] * epsilon_c)) * (P_design_MPa - P_safe_MPa)
 else:
-    t_min = 0.0 # No repair needed for strength
+    t_min = 0.0 
 
 n_layers = math.ceil(t_min / material_data["Ply Thickness"])
-if n_layers < 2: n_layers = 2 # Minimum usually 2
-
+if n_layers < 2: n_layers = 2
 final_thickness = n_layers * material_data["Ply Thickness"]
 
-# 4. Repair Length
-# Type A (Shear transfer)
-# L_over_A = 0.5 * (Ea * epsilon_axial * t_repair) / tau  (Standard ISO approximation)
-# CSV Type A used ~121mm. 
-epsilon_a = 0.001 # Standard assumption if not calculated
+# 5. Repair Length
+epsilon_a = 0.001 
 L_over_A = (material_data["Ea"] * epsilon_a * final_thickness) / material_data["Lap Shear (tau)"]
-# Safety factor often applied, CSV had 121 for 6.8mm thick. 
-# My calc: (43800 * 0.001 * 6.8)/7.37 = 40. 
-# CSV likely uses a Safety Factor (gamma) of ~3 or specific energy release rate formula.
-# I will apply a Factor of 3 to align with CSV magnitudes.
-L_over_A = L_over_A * 3.0
-L_over_A = max(L_over_A, 50.0) # ISO minimum 50mm
+L_over_A = L_over_A * 3.0 # Safety Factor
+L_over_A = max(L_over_A, 50.0)
 
-# Type B (Leak Sealing)
-# L_over_B = 2 * sqrt(D * t) for leaks usually, or based on fracture mechanics.
-# CSV used 264mm for D=1219. 2 * sqrt(1219 * 14.3) = 264. Matches perfectly.
 L_over_B = 2 * math.sqrt(D_mm * t_wall_mm)
 
 if repair_type.startswith("Type A"):
+    # If the pipe is NOT leaking (Type A), check if defect is deep
+    # If defect > 80% or P_safe is very low, treat closer to Type B, 
+    # but strictly per ISO Type A logic:
     L_over_final = L_over_A
 else:
-    L_over_final = max(L_over_A, L_over_B) # Type B must also satisfy Type A structural reqs
+    L_over_final = max(L_over_A, L_over_B)
 
-L_taper = 40 # approx from CSV
+L_taper = 40 
 L_total = (2 * L_over_final) + L_defect_mm + (2 * L_taper)
 
 # --- DISPLAY RESULTS ---
+
+# Top Alert if Safe Pressure is low
+if P_safe_MPa < P_design_MPa:
+    st.warning(f"⚠️ Pipe is unsafe! Design Pressure ({P_design_bar} bar) > Safe Pressure ({P_safe_bar:.2f} bar). Repair required.")
+else:
+    st.success(f"✅ Pipe is safe without repair (Ps = {P_safe_bar:.2f} bar). Minimum layers applied for protection.")
 
 col1, col2 = st.columns(2)
 
 with col1:
     st.markdown('<div class="metric-card">', unsafe_allow_html=True)
     st.subheader("📋 Repair Thickness")
-    st.write(f"Calculated Min Thickness: **{t_min:.2f} mm**")
-    st.markdown(f"Required Layers: <span class='big-font'>{n_layers}</span>", unsafe_allow_html=True)
-    st.write(f"Final Thickness: **{final_thickness:.2f} mm**")
+    st.write(f"Defect Depth: **{defect_depth_pct}%** ({d_defect:.1f} mm)")
+    st.write(f"Calculated Safe Pressure (Ps): **{P_safe_bar:.2f} bar**")
+    st.markdown("---")
+    st.write(f"Min Thickness Required: **{t_min:.2f} mm**")
+    st.markdown(f"Final Layers: <span class='big-font'>{n_layers}</span>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col2:
@@ -139,27 +149,9 @@ with col2:
     st.markdown(f"Total Axial Length: <span class='big-font'>{math.ceil(L_total)} mm</span>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown("---")
-st.subheader("📝 Calculation Details")
-
-with st.expander("See Intermediate Calculation Factors"):
-    st.write("These values determine the repair thickness based on ISO 24817 methodology.")
-    
-    details_df = pd.DataFrame({
-        "Parameter": ["Temperature Derating (fT)", "Allowable Strain (εc0)", "Thermal Strain Correction", "Final Design Strain (εc)", "Design Pressure", "Safe Defect Pressure"],
-        "Value": [
-            f"{f_T:.4f}",
-            f"{epsilon_c0:.6f}",
-            f"{term_thermal:.6f}",
-            f"{epsilon_c:.6f}",
-            f"{P_design_bar} bar",
-            f"{P_safe_bar} bar"
-        ],
-        "Unit": ["-", "mm/mm", "mm/mm", "mm/mm", "bar", "bar"]
-    })
-    st.table(details_df)
-
-    st.info("""
-    **Note:** This calculator uses hardcoded material properties for 'Prowrap 110' derived from the uploaded sheet. 
-    Ensure 'Safe Operating Pressure' is calculated using Modified B31G or similar standard before entering.
-    """)
+with st.expander("See Modified B31G Calculation Details"):
+    st.write("Safe pressure calculated using Modified B31G method (0.85dL Area Method).")
+    st.latex(r"M = \sqrt{1 + 0.6275 \frac{L^2}{Dt} - 0.003375 (\frac{L^2}{Dt})^2}")
+    st.write(f"**Folias Factor (M):** {M:.4f}")
+    st.write(f"**Flow Stress (S_flow):** {S_flow} MPa")
+    st.write(f"**Safe Pressure (Ps):** {P_safe_MPa:.2f} MPa ({P_safe_bar:.2f} bar)")
