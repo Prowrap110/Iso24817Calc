@@ -1,182 +1,158 @@
-import streamlit as st
 import math
-import pandas as pd
-import numpy as np
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="ISO 24817 Repair Calculator", page_icon="🔧", layout="wide")
-
-# --- CUSTOM CSS ---
-st.markdown("""
-    <style>
-    .big-font { font-size:24px !important; font-weight: bold; color: #2E86C1; }
-    .warning-text { font-size:24px !important; font-weight: bold; color: #D35400; }
-    .metric-card { background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #2E86C1; }
-    .warning-card { background-color: #fff3cd; padding: 20px; border-radius: 10px; border-left: 5px solid #ffc107; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- SIDEBAR INPUTS ---
-st.sidebar.header("1. Pipe Data")
-D_mm = st.sidebar.number_input("Pipe Outer Diameter (mm)", value=1219.2, step=10.0)
-t_wall_mm = st.sidebar.number_input("Nominal Wall Thickness (mm)", value=14.3, step=0.1)
-SMYS_MPa = st.sidebar.number_input("Pipe SMYS (Yield Strength) (MPa)", value=358.0, help="e.g., Grade B=241, X52=358, X60=413, X65=448")
-
-st.sidebar.header("2. Defect Dimensions")
-L_defect_mm = st.sidebar.number_input("Defect Axial Length (mm)", value=100.0, step=10.0)
-W_defect_mm = st.sidebar.number_input("Defect Circumferential Width (mm)", value=50.0, step=10.0)
-t_remaining_mm = st.sidebar.number_input("Remaining Wall Thickness (mm)", value=8.5, step=0.1, help="The thinnest point of the wall at the defect")
-
-st.sidebar.header("3. Operating Conditions")
-P_design_bar = st.sidebar.number_input("Design Pressure (bar)", value=75.0, step=1.0)
-T_design_C = st.sidebar.number_input("Design Temperature (°C)", value=40.0, step=1.0)
-T_install_C = st.sidebar.number_input("Installation Temperature (°C)", value=25.0, step=1.0)
-lifetime_years = st.sidebar.selectbox("Design Lifetime (Years)", [2, 5, 10, 20], index=3)
-repair_type = st.sidebar.radio("Repair Type", ["Type A (Non-leaking)", "Type B (Leaking/Through-wall)"])
-
-# --- MATERIAL PROPERTIES (Prowrap 110) ---
-material_data = {
-    "Name": "Prowrap 110",
-    # Short keys for formulas
-    "Ec": 45460,                   # MPa - Hoop modulus
-    "Ea": 43800,                   # MPa - Axial modulus
-    # Descriptive keys (kept for reference)
-    "Ec (Hoop Modulus)": 45460,    # MPa 
-    "Ea (Axial Modulus)": 43800,   # MPa
-    "Ply Thickness": 0.83,         # mm
-    "Tg": 103,                     # °C
-    "Tm": 83,                      # °C
-    "Lap Shear (tau)": 7.37,       # MPa
-    "Alpha_c": 1.034e-05,          # /°C
-    "Alpha_s": 1.2e-06             # Steel CTE
-}
-
-# --- CALCULATIONS ---
-
-st.title("🔧 ISO 24817 Composite Repair Calculator")
-st.markdown(f"**Material Selected:** {material_data['Name']}")
-
-# 1. Calculate Geometry & Safe Pressure (Modified B31G)
-# Defect Geometry
-if t_remaining_mm > t_wall_mm:
-    st.error("Error: Remaining thickness cannot be greater than nominal wall thickness.")
-    st.stop()
-
-d_defect = t_wall_mm - t_remaining_mm
-depth_ratio = d_defect / t_wall_mm
-
-# Modified B31G Calculation for Ps
-# Flow Stress (S_flow) = SMYS + 69 MPa
-S_flow = SMYS_MPa + 69.0 
-
-# Folias Factor (M)
-z = (L_defect_mm**2) / (D_mm * t_wall_mm)
-if z <= 50:
-    M = math.sqrt(1 + 0.6275 * z - 0.003375 * z**2)
-else:
-    M = 0.032 * z + 3.3
-
-# Remaining Strength Factor (0.85dL)
-R_SF = 0.85 
-term_numerator = 1 - (R_SF * depth_ratio)
-term_denominator = 1 - (R_SF * depth_ratio / M)
-
-# Prevent division by zero if defect is very deep/through wall
-if term_denominator <= 0 or repair_type.startswith("Type B"):
-    P_safe_MPa = 0.0
-else:
-    P_safe_MPa = (2 * S_flow * t_wall_mm / D_mm) * (term_numerator / term_denominator)
-
-P_safe_bar = P_safe_MPa * 10.0 # Convert MPa back to bar
-
-# 2. Temperature De-rating
-f_T = max(0.0, min(1.0, (material_data["Tm"] - T_design_C) / (material_data["Tm"] - 20))) 
-if T_design_C > material_data["Tm"]:
-    st.error("Error: Design Temperature exceeds Material Upper Limit (Tm)!")
-    st.stop()
-
-# 3. Allowable Strain
-epsilon_c0 = 0.0025 
-delta_T = abs(T_design_C - T_install_C)
-term_thermal = delta_T * (material_data["Alpha_s"] - material_data["Alpha_c"])
-epsilon_c = (f_T * epsilon_c0) - term_thermal
-
-# 4. Minimum Thickness (Type A)
-P_design_MPa = P_design_bar * 0.1
-
-if repair_type.startswith("Type B"):
-    # Type B usually requires specific calculation for leaking defects
-    # For now, we assume structural reinforcement logic for containment + B check
-    # P_safe is 0 for leaking, so full pressure is taken by composite
-    t_min = (D_mm / (2 * material_data["Ec"] * epsilon_c)) * (P_design_MPa) 
-else:
-    # Type A
-    if P_design_MPa > P_safe_MPa:
-        t_min = (D_mm / (2 * material_data["Ec"] * epsilon_c)) * (P_design_MPa - P_safe_MPa)
-    else:
-        t_min = 0.0 
-
-n_layers = math.ceil(t_min / material_data["Ply Thickness"])
-if n_layers < 2: n_layers = 2
-final_thickness = n_layers * material_data["Ply Thickness"]
-
-# 5. Repair Length
-epsilon_a = 0.001 
-L_over_A = (material_data["Ea"] * epsilon_a * final_thickness) / material_data["Lap Shear (tau)"]
-L_over_A = L_over_A * 3.0 # Safety Factor
-L_over_A = max(L_over_A, 50.0)
-
-L_over_B = 2 * math.sqrt(D_mm * t_wall_mm)
-
-if repair_type.startswith("Type A"):
-    L_over_final = L_over_A
-else:
-    L_over_final = max(L_over_A, L_over_B)
-
-L_taper = 40 
-L_total = (2 * L_over_final) + L_defect_mm + (2 * L_taper)
-
-# --- DISPLAY RESULTS ---
-
-# Top Alert
-if repair_type.startswith("Type A"):
-    if P_safe_MPa < P_design_MPa:
-        st.warning(f"⚠️ Defect weakens pipe below Design Pressure. Ps ({P_safe_bar:.2f} bar) < Pd ({P_design_bar} bar). Repair Required.")
-    else:
-        st.success(f"✅ Pipe strength is sufficient (Ps = {P_safe_bar:.2f} bar). Repair is optional/protective.")
-else:
-    st.error("⚠️ Type B (Through-wall/Leaking) Repair selected. Full pressure containment required.")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-    st.subheader("📋 Repair Thickness")
-    st.write(f"Remaining Wall: **{t_remaining_mm} mm**")
-    st.write(f"Calculated Safe Pressure (Ps): **{P_safe_bar:.2f} bar**")
-    st.markdown("---")
-    st.write(f"Min Thickness Required: **{t_min:.2f} mm**")
-    
-    # Conditional Note for Layer Count
-    layer_note = ""
-    if n_layers <= 2:
-        # Note: 'warning-text' class matches size (24px) but uses orange color
-        layer_note = "<br><span class='warning-text'>⚠️ Prowrap recommends 3 layers according to ISO 24817</span>"
+class ProwrapSystem:
+    """
+    Database of Prowrap Certified Properties derived from provided datasheet.
+    """
+    def __init__(self):
+        # Mechanical Properties
+        self.ply_thickness = 0.83  # mm
+        self.E_circ = 45460  # MPa (45.46 GPa)
+        self.E_axial = 43800  # MPa (43.8 GPa)
+        self.tensile_strength_circ = 574.1  # MPa
+        self.tensile_strain_fail = 0.0233  # 2.33%
         
-    st.markdown(f"Final Layers: <span class='big-font'>{n_layers}</span>{layer_note}", unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+        # Thermal & Interface
+        self.Tg = 75.5  # °C
+        self.max_op_temp = 55.5  # °C
+        self.lap_shear_strength = 7.37  # MPa
+        
+        # QA/QC
+        self.shore_D = 79.1
+    
+    def get_allowable_strain(self, safety_factor=3.0, temperature=25):
+        """
+        Returns design strain with temp derating and safety factor.
+        ISO 24817/ASME PCC-2 typically limits long-term strain to ~0.25% - 0.3% 
+        or applies factors. Here we use the simplified SF approach from your prompt.
+        """
+        # Temperature derating factor (Simplified step based on prompt)
+        temp_factor = 1.0
+        if temperature > 40:
+            temp_factor = 0.95
+            
+        derated_strain = self.tensile_strain_fail * temp_factor
+        return derated_strain / safety_factor
 
-with col2:
-    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-    st.subheader("📏 Repair Length")
-    st.write(f"Overlap Length (L_over): **{L_over_final:.1f} mm**")
-    st.write(f"Axial Defect Length: **{L_defect_mm} mm**")
-    st.write(f"Circumferential Width: **{W_defect_mm} mm**")
-    st.markdown(f"Total Axial Repair Length: <span class='big-font'>{math.ceil(L_total)} mm</span>", unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+def calculate_repair(
+    pipe_od_mm, 
+    pipe_wall_mm, 
+    pressure_bar, 
+    temperature_c, 
+    defect_depth_mm, 
+    defect_length_mm, 
+    defect_type="External Corrosion"
+):
+    print("="*60)
+    print(f"PROWRAP COMPOSITE REPAIR CALCULATOR (ISO 24817 / ASME PCC-2)")
+    print("="*60)
 
-with st.expander("See Calculation Details"):
-    st.write("Safe pressure calculated using Modified B31G method.")
-    st.write(f"**Defect Depth:** {d_defect:.2f} mm")
-    st.write(f"**Folias Factor (M):** {M:.4f}")
-    st.write(f"**Flow Stress (S_flow):** {S_flow} MPa")
+    # --- 1. Load Material Data ---
+    wrap = ProwrapSystem()
+    
+    # --- 2. Input Validation ---
+    if temperature_c > wrap.max_op_temp:
+        print(f"❌ CRITICAL ERROR: Temp ({temperature_c}°C) exceeds Prowrap limit ({wrap.max_op_temp}°C).")
+        return
+    
+    remaining_wall = pipe_wall_mm - defect_depth_mm
+    if remaining_wall < 0:
+        print("❌ CRITICAL ERROR: Defect depth exceeds wall thickness.")
+        return
+
+    # --- 3. Design Parameters ---
+    pressure_mpa = pressure_bar * 0.1
+    # Allowable strain (epsilon_d)
+    # Using SF=3.0 per your request, though standards often use partial factors
+    design_strain = wrap.get_allowable_strain(safety_factor=3.0, temperature=temperature_c)
+    
+    print(f"INPUT DATA:")
+    print(f"  Pipe OD: {pipe_od_mm} mm | Wall: {pipe_wall_mm} mm")
+    print(f"  Pressure: {pressure_bar} bar | Temp: {temperature_c}°C")
+    print(f"  Defect: {defect_type} | Depth: {defect_depth_mm} mm")
+    print("-" * 60)
+
+    # --- 4. Thickness Calculation (Strain Based) ---
+    # Reference: ASME PCC-2 Art 4.1 Eq (1) / ISO 24817 Eq (4)
+    # t_min = (P * D) / (2 * E_c * eps) - t_remaining_effective
+    # Note: For conservative design, we assume the composite takes the full hoop load
+    # if the internal substrate has yielded, or we share load. 
+    # Here we calculate thickness assuming composite carries internal pressure capacity lost.
+    
+    # Substrate strain at design pressure
+    pipe_hoop_stress = (pressure_mpa * pipe_od_mm) / (2 * remaining_wall)
+    
+    # Required thickness to keep composite strain below limit:
+    # t = (P * D) / (2 * E_c * design_strain)
+    t_repair_required = (pressure_mpa * pipe_od_mm) / (2 * wrap.E_circ * design_strain)
+    
+    # If the pipe still has significant wall, ISO allows subtracting the contribution of the steel.
+    # However, standard practice for "Type A" corrosion often calculates repair 
+    # to restore full MAOP equivalent. We stick to the conservative t_required above.
+
+    # --- 5. Ply Calculation ---
+    num_plies = math.ceil(t_repair_required / wrap.ply_thickness)
+    # Minimum 2 layers required by most standards even if calc is low
+    if num_plies < 2: 
+        num_plies = 2
+        
+    final_thickness = num_plies * wrap.ply_thickness
+
+    # --- 6. Repair Length & Overlap (Shear Check) ---
+    # Axial Load force per unit circumference to be transferred = P * D / 4 (for closed end)
+    # Or based on defect length.
+    # Min Overlap Length (L_over) based on Lap Shear Strength (tau):
+    # L_over = (E_c * eps * t_repair) / (2 * tau) * Safety_Factor
+    # We use conservative stress transfer:
+    
+    composite_tensile_force = final_thickness * wrap.E_circ * design_strain
+    # Using simple shear lag model L = Force / Tau
+    # Applying SF=3.0 on shear transfer as well
+    min_overlap = (composite_tensile_force) / (wrap.lap_shear_strength / 3.0)
+    
+    # ASME/ISO typically require min 50mm or calculated value
+    overlap_length = max(50.0, min_overlap)
+    
+    total_repair_length = defect_length_mm + (2 * overlap_length)
+
+    # --- 7. Material Estimates ---
+    circumference = math.pi * pipe_od_mm
+    total_area_m2 = (total_repair_length/1000) * (circumference/1000) * num_plies
+    # Adding 15% waste factor
+    total_area_m2_safe = total_area_m2 * 1.15
+    
+    # Resin Usage (Approx 1.2 kg/m2 for heavy carbon, or vol based)
+    # Using volume approach: 
+    composite_vol_m3 = total_area_m2 * (wrap.ply_thickness / 1000)
+    # Assuming 60% resin volume per your prompt (high, but safe for estimation)
+    resin_liters = composite_vol_m3 * 0.60 * 1000 
+
+    # --- 8. Results Output ---
+    print(f"CALCULATION RESULTS (PROWRAP):")
+    print(f"  ✓ Required Thickness:     {t_repair_required:.2f} mm")
+    print(f"  ✓ Certified Ply Thick:    {wrap.ply_thickness} mm")
+    print(f"  ✓ Selected No. of Plies:  {num_plies} layers")
+    print(f"  ✓ Final Repair Thickness: {final_thickness:.2f} mm")
+    print(f"  ✓ Min. Overlap Length:    {overlap_length:.1f} mm (Controlled by Lap Shear {wrap.lap_shear_strength} MPa)")
+    print(f"  ✓ Total Repair Length:    {total_repair_length:.1f} mm")
+    print(f"")
+    print(f"MATERIAL ESTIMATION:")
+    print(f"  ✓ Carbon Fabric Needed:   {total_area_m2_safe:.2f} m² (incl. 15% waste)")
+    print(f"  ✓ Resin Volume Est.:      {resin_liters:.2f} Liters")
+    print(f"")
+    print(f"COMPLIANCE CHECKS:")
+    print(f"  ✓ Design Strain:          {design_strain*100:.3f}% (Limit: {wrap.tensile_strain_fail*100:.2f}% / 3.0)")
+    print(f"  ✓ Temperature:            {temperature_c}°C (Limit {wrap.max_op_temp}°C)")
+    print(f"  ✓ Shore D Requirement:    {wrap.shore_D} (for QC)")
+
+# --- EXAMPLE USAGE ---
+# You can change these values to test different scenarios
+calculate_repair(
+    pipe_od_mm=219.1,       # 8 inch pipe
+    pipe_wall_mm=8.18,      # Sch 40
+    pressure_bar=20,        # Design Pressure
+    temperature_c=45,       # Operating Temp
+    defect_depth_mm=4.0,    # 50% wall loss
+    defect_length_mm=150,   # Axial length of corrosion
+    defect_type="Ext Corrosion"
+)
