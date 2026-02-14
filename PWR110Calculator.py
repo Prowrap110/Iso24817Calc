@@ -19,8 +19,8 @@ PROWRAP = {
     "lap_shear": 7.37,            # MPa
     "max_temp": 55.5,             # °C
     "shore_d": 79.1,              #
-    "cloth_width_mm": 300,        # Standard Roll Width
-    "stitching_overlap_mm": 50    # Axial overlap between bands
+    "cloth_width_mm": 300,        
+    "stitching_overlap_mm": 50    
 }
 
 def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, rem_wall, yield_strength, design_factor):
@@ -96,31 +96,32 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
 
     total_repair_length_calc = length + (2 * overlap_length)
 
-    # --- G. MATERIAL OPTIMIZATION (Roll Width 300mm) ---
+    # --- G. MATERIAL OPTIMIZATION ---
     if total_repair_length_calc <= PROWRAP["cloth_width_mm"]:
         num_bands = 1
         procurement_axial_length = 300
     else:
-        # Optimized formula: ((calculated repair length - 300) / 250) + 1
         num_bands = math.ceil((total_repair_length_calc - 300) / 250) + 1
-        procurement_axial_length = num_bands * 300 # mm
+        procurement_axial_length = num_bands * 300
     
     circumference_m = (math.pi * od) / 1000
     axial_procurement_m = procurement_axial_length / 1000
-    
     optimized_sqm = axial_procurement_m * circumference_m * num_plies
     epoxy_kg = optimized_sqm * 1.2 
 
     # --- H. DISPLAY RESULTS ---
-    st.success(f"✅ Calculation & Material Optimization Complete")
+    st.success(f"✅ Calculation Complete")
 
-    # Metrics Grid - Added Required Repair Length [ISO]
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Required Plies", f"{num_plies}", f"{final_thickness:.2f} mm")
-    m2.metric("Req. Repair Length", f"{total_repair_length_calc:.0f} mm", help="Engineering requirement based on ISO/ASME calculations")
-    m3.metric("Procurement Length", f"{procurement_axial_length} mm", f"{num_bands} Band(s)")
+    m2.metric("Req. Repair Length", f"{total_repair_length_calc:.0f} mm")
+    m3.metric("Procurement Length", f"{procurement_axial_length} mm")
     m4.metric("Optimized Fabric", f"{optimized_sqm:.2f} m²")
     m5.metric("Epoxy Needed", f"{epoxy_kg:.1f} kg")
+
+    # PROTAP Recommendation logic
+    if num_plies == 2:
+        st.warning("⚠️ **PROTAP Recommendation:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment.")
 
     tab1, tab2 = st.tabs(["📊 Engineering Analysis", "📄 Method Statement"])
     
@@ -131,19 +132,16 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
             st.write(f"**Mechanism:** {defect_type}")
             st.write(f"**Wall Loss:** {wall_loss_ratio*100:.1f}%")
             st.write(f"**Effective Pipe Capacity:** {p_steel_capacity:.2f} MPa")
-            st.write(f"**Repair Class:** {'Type B' if 'Type B' in calc_method_thick else 'Type A'}")
         with c2:
             st.markdown("### Structural Design")
             st.write(f"**Composite Design Pressure:** {p_composite_design:.2f} MPa")
             st.write(f"**Design Strain Limit:** {design_strain*100:.3f}%")
-            st.write(f"**Calculated Safety Factor:** {safety_factor:.2f}")
-            st.write(f"**Min. Required Overlap:** {overlap_length:.1f} mm")
+            st.write(f"**Safety Factor:** {safety_factor:.2f}")
 
     with tab2:
         st.markdown("## 🛠️ Prowrap Repair Method Statement")
         st.markdown("---")
         
-        # VISUAL DATA GRID
         c_pipe, c_defect, c_repair = st.columns(3)
         with c_pipe:
             st.info("**1. Pipeline Parameters**")
@@ -179,17 +177,18 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
         1. **Surface Prep:** Grit blast to **SA 2.5**; Profile **>60µm**.
         2. **Primer/Filler:** Apply Prowrap Filler to defect area to restore OD.
         3. **Lamination:** Saturate Carbon Cloth. Apply **{num_plies} layers** per band.
-        4. **Wrapping:** This repair requires **{num_bands} band(s)** of 300mm cloth to cover the required **{total_repair_length_calc:.0f}mm**.
-           * {'*Note: Ensure 50mm axial overlap between bands.*' if num_bands > 1 else ''}
-        5. **Quality Control:** Minimum Shore D hardness of **{PROWRAP['shore_d']}** required for acceptance.
+        4. **Wrapping:** Use **{num_bands} band(s)** of 300mm cloth.
+        5. **Quality Control:** Minimum Shore D hardness of **{PROWRAP['shore_d']}** required.
         """)
+        
+        if num_plies == 2:
+            st.error("❗ **NOTE:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment.")
 
 def main():
     try:
         st.title("🔧 Prowrap Repair Master Calculator")
-        st.markdown(f"**Certified Standard:** ISO 24817 / ASME PCC-2 | **T-Limit:** {PROWRAP['max_temp']}°C")
+        st.markdown(f"**Standard:** ISO 24817 / ASME PCC-2 | **T-Limit:** {PROWRAP['max_temp']}°C")
         
-        # SIDEBAR INPUTS
         st.sidebar.header("1. Project Info")
         st.sidebar.text_input("Customer", value="PROTAP")
         st.sidebar.text_input("Location", value="Turkey")
