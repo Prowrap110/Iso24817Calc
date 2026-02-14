@@ -9,7 +9,6 @@ st.set_page_config(
 )
 
 # --- 2. PROWRAP CERTIFIED DATA ---
-# Source: Prowrap Technical Data Sheet
 PROWRAP = {
     "ply_thickness": 0.83,        # mm
     "modulus_circ": 45460,        # MPa
@@ -37,42 +36,30 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
         for err in errors: st.error(err)
         return
 
-    # --- B. DEFECT ASSESSMENT (THE NEW LOGIC) ---
+    # --- B. DEFECT ASSESSMENT ---
     wall_loss_ratio = (wall - rem_wall) / wall
     is_severe_loss = wall_loss_ratio > 0.65
     
-    # Initialize logic flags
-    # 1. Thickness Calculation Method: Type A (Load Share) vs Type B (Total Replace)
-    # 2. Overlap Calculation Method: Type A (Geometry) vs Type B (Shear)
-    
+    # Default Methods
     calc_method_thick = "Type B (Total Replacement)"
     calc_method_overlap = "Type B (Shear Controlled)"
     
+    # 1. Logic for Repair Type
     if defect_type == "Corrosion":
-        if defect_loc == "Internal":
-             # Internal corrosion is typically Type B by default in standards
-             # But following user prompt strictly for "Corrosion" wall loss rules:
-             if is_severe_loss:
-                 calc_method_thick = "Type B (Loss > 65%)"
-                 calc_method_overlap = "Type B (Loss > 65%)"
-             else:
-                 calc_method_thick = "Type A (Loss <= 65%)"
-                 calc_method_overlap = "Type A (Loss <= 65%)"
-        else: # External Corrosion
-             if is_severe_loss:
-                 calc_method_thick = "Type B (Loss > 65%)"
-                 calc_method_overlap = "Type B (Loss > 65%)"
-             else:
-                 calc_method_thick = "Type A (Loss <= 65%)"
-                 calc_method_overlap = "Type A (Loss <= 65%)"
+        if defect_loc == "External" and not is_severe_loss:
+             calc_method_thick = "Type A (Load Sharing)"
+             calc_method_overlap = "Type A (Geometry Controlled)"
+        else:
+             # Internal or Severe External (>65%)
+             calc_method_thick = "Type B (Total Replacement)"
+             calc_method_overlap = "Type B (Shear Controlled)"
 
     elif defect_type == "Dent":
-        # Prompt: Type A for Thickness, Type B for Overlap
+        # Dent Logic: Type A Thickness (Reinforce), Type B Overlap (Constraint)
         calc_method_thick = "Type A (Dent Reinforcement)"
         calc_method_overlap = "Type B (Dent Constraint)"
         
-    elif defect_type == "Leak" or defect_type == "Crack":
-        # Prompt: Type B for both
+    elif defect_type in ["Leak", "Crack"]:
         calc_method_thick = "Type B (Leak/Crack)"
         calc_method_overlap = "Type B (Leak/Crack)"
 
@@ -81,16 +68,34 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     temp_factor = 0.95 if temp > 40 else 1.0
     design_strain = (PROWRAP["strain_fail"] * temp_factor) / safety_factor
 
-    # --- D. THICKNESS CALCULATION ---
+    # --- D. PIPE CAPACITY CALCULATION ---
     pressure_mpa = pressure * 0.1
-    
-    # Steel Capacity (Barlow)
     allowable_steel_stress = yield_strength * design_factor
-    p_steel_capacity = (2 * allowable_steel_stress * rem_wall) / od
+    
+    # 1. Calculate Theoretical Capacity (Barlow's)
+    # This applies to Corrosion AND Dent now.
+    theoretical_capacity = (2 * allowable_steel_stress * rem_wall) / od
+    
+    # 2. Determine Effective Capacity
+    if defect_type in ["Leak", "Crack"]:
+        # Leaks/Cracks bypass the steel entirely
+        p_steel_capacity = 0.0
+    elif defect_loc == "Internal":
+        # Internal defects assumed to propagate; strict standards often assume 0 capacity
+        p_steel_capacity = 0.0 
+    elif is_severe_loss:
+        # Severe wall loss (>65%) treated as structurally compromised
+        p_steel_capacity = 0.0
+    else:
+        # Corrosion (mild) AND Dent use the remaining wall strength
+        p_steel_capacity = theoretical_capacity
+
+    # --- E. THICKNESS CALCULATION ---
     
     # Determine Design Pressure for Composite
-    if "Type A" in calc_method_thick:
+    if "Type A" in calc_method_thick and p_steel_capacity > 0:
         # Load Sharing: Composite takes excess pressure only
+        # This now correctly works for Dents!
         p_composite_design = max(0, pressure_mpa - p_steel_capacity)
     else:
         # Type B: Composite takes FULL pressure
@@ -115,7 +120,7 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
 
     final_thickness = num_plies * PROWRAP["ply_thickness"]
 
-    # --- E. REPAIR LENGTH & OVERLAP ---
+    # --- F. OVERLAP CALCULATION ---
     overlap_length = 0.0
     
     if "Type A" in calc_method_overlap:
@@ -132,14 +137,14 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
 
     total_repair_length = length + (2 * overlap_length)
 
-    # --- F. MATERIAL ESTIMATION ---
+    # --- G. MATERIAL ESTIMATION ---
     circumference_mm = math.pi * od
     repair_area_m2 = (total_repair_length / 1000.0) * (circumference_mm / 1000.0) * num_plies
     fabric_needed_m2 = repair_area_m2 * 1.15
     composite_volume_m3 = (fabric_needed_m2 / 1.15) * (PROWRAP["ply_thickness"] / 1000.0)
     resin_liters = composite_volume_m3 * 0.60 * 1000.0 * 1.2 
 
-    # --- G. DISPLAY RESULTS ---
+    # --- H. DISPLAY RESULTS ---
     st.success(f"✅ Calculation Complete")
 
     # Metrics
@@ -165,7 +170,7 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
             if defect_type == "Corrosion":
                 st.write(f"**Wall Loss:** {wall_loss_ratio*100:.1f}%")
                 if is_severe_loss:
-                    st.error("⚠️ Severe Wall Loss (>65%) detected.")
+                    st.error("⚠️ Severe Wall Loss (>65%)")
                 else:
                     st.success("✅ Moderate Wall Loss (≤65%)")
             
@@ -174,13 +179,12 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
             st.write(f"**Overlap Logic:** {calc_method_overlap}")
 
         with c2:
-            st.write(f"**Pipe Capacity:** {p_steel_capacity:.1f} MPa")
+            st.write(f"**Pipe Capacity (Effective):** {p_steel_capacity:.1f} MPa")
             st.write(f"**Composite Load:** {p_composite_design:.1f} MPa")
             st.write(f"**Required Thickness:** {t_required:.3f} mm")
-            if "Type B" in calc_method_overlap:
-                st.write(f"**Shear Length:** {overlap_length:.1f} mm")
-            else:
-                st.write(f"**Taper/Min Length:** {overlap_length:.1f} mm")
+            
+            if p_steel_capacity == 0 and defect_type in ["Leak", "Crack"]:
+                st.caption("ℹ️ Note: For Leaks/Cracks, Pipe Capacity is treated as 0 MPa.")
 
     with tab2:
         st.subheader("Application Data")
