@@ -62,12 +62,14 @@ def main():
 
     # --- CALCULATION BUTTON ---
     if st.sidebar.button("Calculate Repair", type="primary"):
+        # FIX: Added yield_strength to the function call here
         run_calculation(
             pipe_od, nominal_wall, design_pressure, op_temp, 
-            defect_mechanism, defect_length, remaining_wall
+            defect_mechanism, defect_length, remaining_wall, yield_strength
         )
 
-def run_calculation(od, wall, pressure, temp, defect_type, length, rem_wall):
+# FIX: Added yield_strength to the function definition here
+def run_calculation(od, wall, pressure, temp, defect_type, length, rem_wall, yield_strength):
     
     # --- 1. VALIDATION CHECKS ---
     errors = []
@@ -186,8 +188,12 @@ def run_calculation(od, wall, pressure, temp, defect_type, length, rem_wall):
         # Stress Check
         pipe_stress = (pressure_mpa * od) / (2 * rem_wall)
         st.write(f"**Pipe Stress (Unreinforced):** {pipe_stress:.2f} MPa")
+        
+        # FIX: The check below was causing the NameError previously
         if pipe_stress > yield_strength:
-            st.warning("⚠️ Pipe is yielding at defect location! Composite is carrying full load.")
+            st.warning(f"⚠️ Pipe is yielding ({pipe_stress:.0f} > {yield_strength} MPa)! Composite is carrying full load.")
+        else:
+            st.success(f"Pipe stress is within yield limits ({pipe_stress:.0f} < {yield_strength} MPa).")
 
     with tab2:
         st.subheader("Application Data")
