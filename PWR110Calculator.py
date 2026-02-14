@@ -43,6 +43,7 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     calc_method_thick = "Type B (Total Replacement)"
     calc_method_overlap = "Type B (Shear Controlled)"
     
+    # Logic defining which method to use
     if defect_type == "Corrosion":
         if defect_loc == "External" and not is_severe_loss:
              calc_method_thick = "Type A (Load Sharing)"
@@ -68,8 +69,10 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     pressure_mpa = pressure * 0.1
     allowable_steel_stress = yield_strength * design_factor
     
+    # Theoretical capacity of the remaining steel
     theoretical_capacity = (2 * allowable_steel_stress * rem_wall) / od
     
+    # Effective capacity (Zero if leak/crack/severe)
     if defect_type in ["Leak", "Crack"]:
         p_steel_capacity = 0.0
     elif defect_loc == "Internal":
@@ -77,12 +80,15 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     elif is_severe_loss:
         p_steel_capacity = 0.0
     else:
+        # For Corrosion (minor) and Dents, we trust the steel strength
         p_steel_capacity = theoretical_capacity
 
     # --- E. THICKNESS ---
+    # Load Sharing: Composite takes only the pressure the steel cannot hold
     if "Type A" in calc_method_thick and p_steel_capacity > 0:
         p_composite_design = max(0, pressure_mpa - p_steel_capacity)
     else:
+        # Type B: Composite takes FULL pressure
         p_composite_design = pressure_mpa
 
     if p_composite_design > 0:
@@ -90,7 +96,10 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     else:
         t_required = 0.0
 
+    # Ply Count
     num_plies = math.ceil(t_required / PROWRAP["ply_thickness"])
+    
+    # Minimums
     min_plies = 4 if defect_type == "Leak" else 2
     if num_plies < min_plies: num_plies = min_plies
 
@@ -99,10 +108,12 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     # --- F. OVERLAP ---
     overlap_length = 0.0
     if "Type A" in calc_method_overlap:
+        # Geometry Controlled
         min_iso_overlap = 50.0
         taper_allowance = 3.0 * final_thickness 
         overlap_length = max(min_iso_overlap, taper_allowance)
     else:
+        # Shear Stress Controlled
         hoop_load = final_thickness * PROWRAP["modulus_circ"] * design_strain
         allowable_shear = PROWRAP["lap_shear"] / safety_factor
         calculated_shear_overlap = hoop_load / allowable_shear
@@ -135,6 +146,7 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
             st.write(f"**Mechanism:** {defect_type}")
             st.write(f"**Wall Loss:** {wall_loss_ratio*100:.1f}%")
             st.write(f"**Pipe Capacity:** {p_steel_capacity:.2f} MPa")
+            st.write(f"**Calc Method:** {calc_method_thick}")
         with c2:
             st.markdown("### Structural Design")
             st.write(f"**Composite Load:** {p_composite_design:.2f} MPa")
@@ -165,7 +177,6 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
             - **Rem. Wall:** {rem_wall} mm
             - **Wall Loss:** {wall_loss_ratio*100:.1f}%
             - **Axial Length:** {length} mm
-            - **Class:** {'Type B' if 'Type B' in calc_method_thick else 'Type A'}
             """)
             
         with c_repair:
@@ -207,29 +218,32 @@ def main():
         
         # Sidebar
         st.sidebar.header("1. General Info")
-        st.sidebar.text_input("Customer", "PROTAP")
-        st.sidebar.text_input("Location", "Turkey")
-        st.sidebar.text_input("Report No", "24-152")
+        st.sidebar.text_input("Customer", value="PROTAP")
+        st.sidebar.text_input("Location", value="Turkey")
+        st.sidebar.text_input("Report No", value="24-152")
 
         st.sidebar.header("2. Pipeline")
-        od = st.sidebar.number_input("Pipe OD [mm]", 457.2)
-        wall = st.sidebar.number_input("Nominal Wall [mm]", 9.53)
-        yield_str = st.sidebar.number_input("Yield [MPa]", 359.0)
+        # FIXED: Using explicit 'value=' for all number inputs
+        od = st.sidebar.number_input("Pipe OD [mm]", value=457.2)
+        wall = st.sidebar.number_input("Nominal Wall [mm]", value=9.53)
+        yield_str = st.sidebar.number_input("Yield [MPa]", value=359.0)
         
         st.sidebar.header("3. Conditions")
-        pres = st.sidebar.number_input("Pressure [bar]", 50.0)
-        temp = st.sidebar.number_input("Temp [°C]", 40.0)
+        pres = st.sidebar.number_input("Pressure [bar]", value=50.0)
+        temp = st.sidebar.number_input("Temp [°C]", value=40.0)
         
         st.sidebar.header("4. Defect")
         type_ = st.sidebar.selectbox("Type", ["Corrosion", "Dent", "Crack", "Leak"])
         loc_ = st.sidebar.selectbox("Location", ["External", "Internal"])
-        len_ = st.sidebar.number_input("Length [mm]", 200.0)
-        wid_ = st.sidebar.number_input("Width [mm]", 100.0)
-        rem_ = st.sidebar.number_input("Remaining Wall [mm]", 4.5)
+        len_ = st.sidebar.number_input("Length [mm]", value=200.0)
+        wid_ = st.sidebar.number_input("Width [mm]", value=100.0)
+        rem_ = st.sidebar.number_input("Remaining Wall [mm]", value=4.5)
         
         st.sidebar.header("5. Settings")
-        st.sidebar.number_input("Lifetime [yrs]", 20)
-        df = st.sidebar.number_input("Design Factor", 0.72, min_value=0.1, max_value=1.0)
+        st.sidebar.number_input("Lifetime [yrs]", value=20)
+        
+        # FIXED: The problematic line is now corrected with explicit args
+        df = st.sidebar.number_input("Design Factor", value=0.72, min_value=0.1, max_value=1.0)
         
         if st.sidebar.button("Calculate Repair", type="primary"):
             run_calculation(od, wall, pres, temp, type_, loc_, len_, rem_, yield_str, df)
@@ -237,4 +251,5 @@ def main():
     except Exception as e:
         st.error(f"Error: {e}")
 
-main()
+if __name__ == "__main__":
+    main()
