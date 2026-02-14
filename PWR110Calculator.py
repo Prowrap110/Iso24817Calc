@@ -9,6 +9,7 @@ st.set_page_config(
 )
 
 # --- 2. PROWRAP CERTIFIED DATA ---
+# Source: Prowrap Technical Data Sheet
 PROWRAP = {
     "ply_thickness": 0.83,        # mm
     "modulus_circ": 45460,        # MPa
@@ -37,7 +38,6 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     wall_loss_ratio = (wall - rem_wall) / wall
     is_severe_loss = wall_loss_ratio > 0.65
     
-    # Defaults
     calc_method_thick = "Type B (Total Replacement)"
     calc_method_overlap = "Type B (Shear Controlled)"
     
@@ -65,11 +65,9 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     allowable_steel_stress = yield_strength * design_factor
     theoretical_capacity = (2 * allowable_steel_stress * rem_wall) / od
     
-    # Effective Capacity logic
     if defect_type in ["Leak", "Crack"] or defect_loc == "Internal" or is_severe_loss:
         p_steel_capacity = 0.0
     else:
-        # Corrosion (External <= 65%) and Dents use the steel strength
         p_steel_capacity = theoretical_capacity
 
     # --- E. THICKNESS & PLY COUNT ---
@@ -88,7 +86,7 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     num_plies = max(num_plies, min_plies)
     final_thickness = num_plies * PROWRAP["ply_thickness"]
 
-    # --- F. REPAIR LENGTH & OVERLAP ---
+    # --- F. ISO REPAIR LENGTH & OVERLAP ---
     if "Type A" in calc_method_overlap:
         overlap_length = max(50.0, 3.0 * final_thickness)
     else:
@@ -103,7 +101,7 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
         num_bands = 1
         procurement_axial_length = 300
     else:
-        # Optimized formula: ((calculated length - 300) / 250) + 1
+        # Optimized formula: ((calculated repair length - 300) / 250) + 1
         num_bands = math.ceil((total_repair_length_calc - 300) / 250) + 1
         procurement_axial_length = num_bands * 300 # mm
     
@@ -111,17 +109,18 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     axial_procurement_m = procurement_axial_length / 1000
     
     optimized_sqm = axial_procurement_m * circumference_m * num_plies
-    # Epoxy Optimization (1.2 kg per sqm for saturation + waste)
     epoxy_kg = optimized_sqm * 1.2 
 
     # --- H. DISPLAY RESULTS ---
     st.success(f"✅ Calculation & Material Optimization Complete")
 
-    m1, m2, m3, m4 = st.columns(4)
+    # Metrics Grid - Added Required Repair Length [ISO]
+    m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Required Plies", f"{num_plies}", f"{final_thickness:.2f} mm")
-    m2.metric("Procurement Length", f"{procurement_axial_length} mm", f"{num_bands} Band(s)")
-    m3.metric("Optimized Fabric", f"{optimized_sqm:.2f} m²")
-    m4.metric("Epoxy Needed", f"{epoxy_kg:.1f} kg")
+    m2.metric("Req. Repair Length", f"{total_repair_length_calc:.0f} mm", help="Engineering requirement based on ISO/ASME calculations")
+    m3.metric("Procurement Length", f"{procurement_axial_length} mm", f"{num_bands} Band(s)")
+    m4.metric("Optimized Fabric", f"{optimized_sqm:.2f} m²")
+    m5.metric("Epoxy Needed", f"{epoxy_kg:.1f} kg")
 
     tab1, tab2 = st.tabs(["📊 Engineering Analysis", "📄 Method Statement"])
     
@@ -168,9 +167,9 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
             st.success("**3. Optimized Repair Design**")
             st.markdown(f"""
             - **Total Plies:** {num_plies} Layers
+            - **Req. Length (ISO):** {total_repair_length_calc:.0f} mm
             - **Axial Band(s):** {num_bands} x 300mm
-            - **Overlap Length:** {overlap_length:.0f} mm (Min)
-            - **Optimized SQM:** {optimized_sqm:.2f} m²
+            - **Procurement Len:** {procurement_axial_length} mm
             - **Epoxy Total:** {epoxy_kg:.1f} kg
             """)
 
@@ -180,7 +179,7 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
         1. **Surface Prep:** Grit blast to **SA 2.5**; Profile **>60µm**.
         2. **Primer/Filler:** Apply Prowrap Filler to defect area to restore OD.
         3. **Lamination:** Saturate Carbon Cloth. Apply **{num_plies} layers** per band.
-        4. **Wrapping:** This repair requires **{num_bands} band(s)** of 300mm cloth.
+        4. **Wrapping:** This repair requires **{num_bands} band(s)** of 300mm cloth to cover the required **{total_repair_length_calc:.0f}mm**.
            * {'*Note: Ensure 50mm axial overlap between bands.*' if num_bands > 1 else ''}
         5. **Quality Control:** Minimum Shore D hardness of **{PROWRAP['shore_d']}** required for acceptance.
         """)
