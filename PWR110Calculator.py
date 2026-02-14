@@ -3,162 +3,202 @@ import math
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="Prowrap Design Calculator",
+    page_title="Prowrap Repair Calculator",
     page_icon="🔧",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# --- PROWRAP DATA CLASS ---
-class ProwrapSystem:
-    """
-    Certified properties for Prowrap Carbon Fiber System.
-    Ref: ISO 24817 / ASME PCC-2 Compliance.
-    """
-    def __init__(self):
-        # Mechanical Properties
-        self.ply_thickness = 0.83  # mm
-        self.E_circ = 45460  # MPa (45.46 GPa)
-        self.tensile_strain_fail = 0.0233  # 2.33%
+# --- PROWRAP CERTIFIED DATA ---
+# These are hardcoded to ensure compliance with the specific datasheet provided.
+PROWRAP = {
+    "ply_thickness": 0.83,        # mm
+    "modulus_circ": 45460,        # MPa (45.46 GPa)
+    "modulus_axial": 43800,       # MPa (43.8 GPa)
+    "tensile_strength": 574.1,    # MPa
+    "strain_fail": 0.0233,        # 2.33%
+    "lap_shear": 7.37,            # MPa
+    "max_temp": 55.5,             # °C (Limit)
+    "tg": 75.5,                   # °C
+    "shore_d": 79.1               # QA/QC
+}
+
+def main():
+    # --- HEADER ---
+    st.title("🔧 Prowrap Composite Repair Calculator")
+    st.markdown("""
+    **Standard:** ISO 24817 / ASME PCC-2  
+    **System:** Prowrap Carbon Fiber Composite  
+    **Certified Limit:** 55.5°C Max Operating Temp
+    """)
+    
+    st.markdown("---")
+
+    # --- SIDEBAR INPUTS ---
+    st.sidebar.header("1. General Info")
+    customer = st.sidebar.text_input("Customer", "PROTAP")
+    location = st.sidebar.text_input("Location", "Turkey")
+    report_no = st.sidebar.text_input("Report No", "24-152")
+
+    st.sidebar.header("2. Pipe Geometry")
+    # Using the inputs from your Excel sheet
+    pipe_od = st.sidebar.number_input("Pipe Diameter (OD) [mm]", value=457.2, min_value=1.0)
+    nominal_wall = st.sidebar.number_input("Nominal Wall Thickness [mm]", value=9.53, min_value=1.0)
+    yield_strength = st.sidebar.number_input("Pipe Yield Strength [MPa]", value=359.0) # X52 default
+    
+    st.sidebar.header("3. Service Conditions")
+    design_pressure = st.sidebar.number_input("Design Pressure [bar]", value=50.0)
+    op_temp = st.sidebar.number_input("Operating Temperature [°C]", value=40.0)
+    
+    st.sidebar.header("4. Defect Details")
+    defect_mechanism = st.sidebar.selectbox("Defect Mechanism", ["Corrosion", "Crack", "Dent", "Leak"])
+    defect_location = st.sidebar.selectbox("Defect Location", ["External", "Internal"])
+    defect_length = st.sidebar.number_input("Axial Defect Length [mm]", value=200.0)
+    defect_width = st.sidebar.number_input("Hoop Defect Width [mm]", value=100.0)
+    remaining_wall = st.sidebar.number_input("Remaining Wall Thickness [mm]", value=4.5)
+
+    st.sidebar.header("5. Repair Settings")
+    design_life = st.sidebar.number_input("Required Lifetime [years]", value=20)
+    pipe_design_factor = st.sidebar.number_input("Pipe Design Factor", value=0.72)
+
+    # --- CALCULATION BUTTON ---
+    if st.sidebar.button("Calculate Repair", type="primary"):
+        run_calculation(
+            pipe_od, nominal_wall, design_pressure, op_temp, 
+            defect_mechanism, defect_length, remaining_wall
+        )
+
+def run_calculation(od, wall, pressure, temp, defect_type, length, rem_wall):
+    
+    # --- 1. VALIDATION CHECKS ---
+    errors = []
+    
+    # Check Temperature Limit
+    if temp > PROWRAP["max_temp"]:
+        errors.append(f"❌ **CRITICAL:** Operating temperature ({temp}°C) exceeds Prowrap limit of {PROWRAP['max_temp']}°C.")
         
-        # Thermal & Interface
-        self.max_op_temp = 55.5  # °C
-        self.lap_shear_strength = 7.37  # MPa
-        self.shore_D = 79.1 # QA/QC
+    # Check Wall Thickness
+    if rem_wall > wall:
+        errors.append("❌ **INPUT ERROR:** Remaining wall cannot be greater than nominal wall.")
+        
+    if rem_wall < 0:
+        errors.append("❌ **INPUT ERROR:** Remaining wall cannot be negative.")
 
-    def get_design_strain(self, safety_factor, temperature):
-        # Temperature derating (Conservative)
-        temp_factor = 0.95 if temperature > 40 else 1.0
-        return (self.tensile_strain_fail * temp_factor) / safety_factor
+    if errors:
+        for err in errors:
+            st.error(err)
+        return
 
-# --- SIDEBAR INPUTS ---
-st.sidebar.header("🛠️ Design Inputs")
+    # --- 2. ENGINEERING CALCULATIONS ---
+    
+    # A. Safety Factor Selection
+    # ISO 24817 / ASME PCC-2 Standard logic
+    # Leaks require higher safety factors and minimum thickness
+    safety_factor = 3.0
+    if defect_type in ["Leak", "Crack"]:
+        safety_factor = 4.0
 
-st.sidebar.subheader("1. Pipe Parameters")
-pipe_od = st.sidebar.number_input("Pipe OD (mm)", value=219.1, help="Outer Diameter")
-pipe_wall = st.sidebar.number_input("Nominal Wall Thickness (mm)", value=8.18)
-pressure = st.sidebar.number_input("Design Pressure (bar)", value=20.0)
-temperature = st.sidebar.number_input("Operating Temp (°C)", value=45.0)
+    # B. Temperature Derating
+    # If temp is > 40C, we apply a small derating factor (standard practice close to limit)
+    temp_factor = 0.95 if temp > 40 else 1.0
+    
+    # C. Allowable Strain (Epsilon Design)
+    # limit = (strain_fail * temp_factor) / Safety_Factor
+    design_strain = (PROWRAP["strain_fail"] * temp_factor) / safety_factor
 
-st.sidebar.subheader("2. Defect Geometry")
-defect_type = st.sidebar.selectbox("Defect Type", ["External Corrosion", "Internal Corrosion", "Through-wall Leak"])
-defect_depth = st.sidebar.number_input("Defect Depth (mm)", value=4.0, max_value=pipe_wall)
-defect_length = st.sidebar.number_input("Axial Defect Length (mm)", value=150.0)
-
-st.sidebar.subheader("3. Safety Factors")
-safety_factor = st.sidebar.slider("Design Safety Factor (Standard: 3.0)", 2.0, 5.0, 3.0, 0.1)
-
-# --- MAIN CALCULATION LOGIC ---
-wrap = ProwrapSystem()
-
-# Initialize flags
-valid_design = True
-error_msg = ""
-
-# Check Temperature
-if temperature > wrap.max_op_temp:
-    valid_design = False
-    error_msg = f"❌ Temperature ({temperature}°C) exceeds Prowrap limit ({wrap.max_op_temp}°C)."
-
-# Check Wall Thickness
-remaining_wall = pipe_wall - defect_depth
-if remaining_wall < 0:
-    valid_design = False
-    error_msg = "❌ Defect depth cannot be larger than wall thickness."
-
-if valid_design:
-    # 1. Convert Units
+    # D. Required Thickness Calculation (Strain Based)
+    # Formula: t_min = (P * D) / (2 * E * epsilon)
+    # Unit conversion: Pressure bar -> MPa
     pressure_mpa = pressure * 0.1
     
-    # 2. Calculate Design Strain
-    design_strain = wrap.get_design_strain(safety_factor, temperature)
+    t_required = (pressure_mpa * od) / (2 * PROWRAP["modulus_circ"] * design_strain)
+
+    # E. Ply Count Calculation
+    # Plies = Ceiling(t_required / ply_thickness)
+    num_plies = math.ceil(t_required / PROWRAP["ply_thickness"])
     
-    # 3. Required Thickness (ISO 24817 Eq. 1 / ASME PCC-2)
-    # t_min = (P * D) / (2 * E * eps) - t_substrate_contribution
-    # Conservative: Assume composite takes full pressure load for long term
-    t_repair_required = (pressure_mpa * pipe_od) / (2 * wrap.E_circ * design_strain)
+    # Minimum ply constraints
+    if num_plies < 2:
+        num_plies = 2
     
-    # Leak sealing requires extra layers check
-    if defect_type == "Through-wall Leak":
-        t_repair_required = max(t_repair_required, 2.0) # Arbitrary min for leak
+    # Special rule for leaks: Add 2 extra layers for sealing assurance
+    if defect_type == "Leak":
+        num_plies += 2
+        st.info("ℹ️ Added 2 extra plies for leak sealing assurance.")
 
-    # 4. Ply Count
-    num_plies = math.ceil(t_repair_required / wrap.ply_thickness)
-    if num_plies < 2: num_plies = 2 # Minimum industry standard
+    final_thickness = num_plies * PROWRAP["ply_thickness"]
+
+    # F. Overlap Length (Shear Transfer)
+    # Force to transfer = Thickness * Modulus * Strain
+    hoop_load = final_thickness * PROWRAP["modulus_circ"] * design_strain
     
-    final_thickness = num_plies * wrap.ply_thickness
-
-    # 5. Overlap Length (Shear Control)
-    # Force to transfer = Stress * Thickness
-    # L = Force / (Shear Strength / SF)
-    hoop_load_per_mm = final_thickness * wrap.E_circ * design_strain
-    allowable_shear = wrap.lap_shear_strength / safety_factor
-    min_overlap = hoop_load_per_mm / allowable_shear
+    # Allowable Shear Stress = Lap Shear / 3.0 (Safety Factor on bond)
+    allowable_shear = PROWRAP["lap_shear"] / 3.0
     
-    overlap_length = max(50.0, min_overlap) # Standard min 50mm
-    total_length = defect_length + (2 * overlap_length)
+    calculated_overlap = hoop_load / allowable_shear
+    
+    # Standard Minimum Overlap (usually 50mm)
+    overlap_length = max(calculated_overlap, 50.0)
+    
+    # Total Repair Length
+    total_repair_length = length + (2 * overlap_length)
 
-    # 6. Material Estimation
-    circumference = math.pi * pipe_od
-    area_m2 = (total_length/1000) * (circumference/1000) * num_plies
-    area_with_waste = area_m2 * 1.15
-    resin_liters = (area_m2 * (wrap.ply_thickness/1000)) * 0.60 * 1000 # 60% resin vol
+    # G. Material Estimation
+    circumference_mm = math.pi * od
+    # Area in m^2 = Length(m) * Width(m) * Plies
+    # Full encirclement assumed for "Wrap"
+    repair_area_m2 = (total_repair_length / 1000.0) * (circumference_mm / 1000.0) * num_plies
+    
+    # Add 15% waste factor
+    fabric_needed_m2 = repair_area_m2 * 1.15
+    
+    # Resin Estimation (Approx 0.8 to 1.0 Liters per kg of carbon, or volume based)
+    # Simple Volume estimation: Volume = Area * Thickness
+    # Assuming 60% Resin Volume fraction for hand layup
+    composite_volume_m3 = (fabric_needed_m2 / 1.15) * (PROWRAP["ply_thickness"] / 1000.0)
+    resin_liters = composite_volume_m3 * 0.60 * 1000.0 * 1.2 # extra 20% waste
 
-# --- DISPLAY LAYOUT ---
+    # --- 3. DISPLAY RESULTS ---
+    
+    st.success("✅ Calculation Complete")
 
-st.title("Prowrap Composite Repair Calculator")
-st.markdown("Compliant with **ISO 24817** and **ASME PCC-2** | System: **Carbon Fiber / Epoxy**")
+    # Metrics Row
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Number of Plies", f"{num_plies}", delta=f"{final_thickness:.2f} mm")
+    with col2:
+        st.metric("Overlap Length", f"{overlap_length:.0f} mm", help="Min length beyond defect")
+    with col3:
+        st.metric("Total Repair Length", f"{total_repair_length:.0f} mm")
+    with col4:
+        st.metric("Fabric Needed", f"{fabric_needed_m2:.2f} m²", help="Includes 15% Waste")
 
-if not valid_design:
-    st.error(error_msg)
-else:
-    # Use tabs for organized view
-    tab1, tab2, tab3 = st.tabs(["📊 Repair Design", "📝 Method Statement", "📋 QA/QC Data"])
-
+    # Tabs for details
+    tab1, tab2 = st.tabs(["📋 Engineering Details", "📝 Method Statement Data"])
+    
     with tab1:
-        st.markdown("### 🎯 Key Design Outputs")
+        st.subheader("Calculation Breakdown")
+        st.write(f"**Design Strain:** {design_strain*100:.3f}%")
+        st.write(f"**Safety Factor:** {safety_factor}")
+        st.write(f"**Required Thickness:** {t_required:.3f} mm")
+        st.write(f"**Hoop Load:** {hoop_load:.2f} N/mm")
+        st.write(f"**Utilization:** {(t_required/final_thickness)*100:.1f}%")
         
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Number of Layers", f"{num_plies} Plies", delta=f"{final_thickness:.2f} mm thick")
-        col2.metric("Total Repair Length", f"{total_length:.0f} mm", help=f"Includes {overlap_length:.0f} mm overlap each side")
-        col3.metric("Carbon Fabric Area", f"{area_with_waste:.2f} m²", help="Includes 15% waste")
-        col4.metric("Resin Volume", f"{resin_liters:.1f} Liters")
-
-        st.divider()
-        
-        st.markdown("### 📐 Engineering Details")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.info(f"**Required Min Thickness:** {t_repair_required:.3f} mm")
-            st.write(f"**Ply Thickness:** {wrap.ply_thickness} mm")
-            st.write(f"**Design Strain:** {design_strain*100:.3f}%")
-        with c2:
-            st.warning(f"**Overlap Length:** {overlap_length:.1f} mm")
-            st.write(f"**Lap Shear Limit:** {wrap.lap_shear_strength} MPa")
-            st.write(f"**Pipe Hoop Stress:** {(pressure_mpa*pipe_od)/(2*pipe_wall):.1f} MPa")
+        # Stress Check
+        pipe_stress = (pressure_mpa * od) / (2 * rem_wall)
+        st.write(f"**Pipe Stress (Unreinforced):** {pipe_stress:.2f} MPa")
+        if pipe_stress > yield_strength:
+            st.warning("⚠️ Pipe is yielding at defect location! Composite is carrying full load.")
 
     with tab2:
-        st.markdown("### 🛠️ Installation Procedure")
-        st.markdown(f"""
-        1. **Surface Prep:** Grit blast to SA 2.5 (Near White Metal). Surface profile > 60 microns.
-        2. **Primer:** Apply Prowrap Primer to prevent flash rust.
-        3. **Filler:** Apply high-modulus filler to the defect area (depth {defect_depth} mm) to restore OD profile.
-        4. **Saturation:** Saturate {num_plies} layers of Carbon Fabric with Epoxy Resin.
-        5. **Wrapping:** Apply **{num_plies} layers** using a 50% overlap technique.
-        6. **Compression:** Apply Peel Ply and Perforated Film, then wrap tightly with compression film.
-        7. **Cure:** Allow to cure for 24 hours at ambient (min 15°C) or heat cure if required.
-        """)
+        st.subheader("Application Data")
+        st.json({
+            "Surface Preparation": "SA 2.5 (Near White Metal)",
+            "Surface Profile": "> 60 microns",
+            "Resin Mix Ratio": "Refer to Prowrap Container Labels",
+            "Cure Time": "24 Hours @ Ambient (Min 15°C)",
+            "Shore D Requirement": f"> {PROWRAP['shore_d']} (ISO 868)",
+            "Resin Quantity Est": f"{resin_liters:.2f} Liters"
+        })
 
-    with tab3:
-        st.markdown("### ✅ Quality Assurance Checkpoints")
-        st.dataframe({
-            "Test": ["Shore D Hardness", "Visual Inspection", "Tap Test"],
-            "Requirement": [f"> {wrap.shore_D} (ISO 868)", "No lifting, dry spots, or ridges", "No hollow sounds (delamination)"],
-            "Frequency": ["Every repair", "100% of surface", "100% of surface"]
-        }, hide_index=True)
-        
-        st.success(f"System Upper Temperature Limit: **{wrap.max_op_temp}°C**")
-
-# Footer
-st.markdown("---")
-st.caption("Generated by AI Engineering Assistant | Verified against Prowrap Technical Data Sheet")
+if __name__ == "__main__":
+    main()
