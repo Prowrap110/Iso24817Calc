@@ -182,7 +182,7 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
         """)
         
         if num_plies == 2:
-            st.error("❗ **NOTE:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment.")
+            st.error("❗ **NOTE:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment inline with ISO 24817.")
 
 def main():
     try:
