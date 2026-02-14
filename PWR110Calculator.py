@@ -121,7 +121,7 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
 
     # PROTAP Recommendation logic
     if num_plies == 2:
-        st.warning("⚠️ **PROTAP Recommendation:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment.")
+        st.warning("⚠️ **PROTAP Recommendation:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment inline with ISO 24817.")
 
     tab1, tab2 = st.tabs(["📊 Engineering Analysis", "📄 Method Statement"])
     
