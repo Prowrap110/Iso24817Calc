@@ -91,4 +91,104 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     temp_factor = 0.95 if temp > 40 else 1.0
     design_strain = (PROWRAP["strain_fail"] * temp_factor) / safety_factor
 
-    # C
+    # C. Required Thickness (Strain Based)
+    pressure_mpa = pressure * 0.1
+    t_required = (pressure_mpa * od) / (2 * PROWRAP["modulus_circ"] * design_strain)
+
+    # D. Ply Count
+    num_plies = math.ceil(t_required / PROWRAP["ply_thickness"])
+    if num_plies < 2: num_plies = 2
+    
+    if defect_type == "Leak":
+        num_plies += 2
+        st.info("ℹ️ Added 2 extra plies for leak sealing assurance.")
+
+    final_thickness = num_plies * PROWRAP["ply_thickness"]
+
+    # --- 3. REPAIR LENGTH & OVERLAP LOGIC (TYPE A vs TYPE B) ---
+    
+    # Check if this is a Type A Repair (External Corrosion only)
+    is_type_a = (defect_loc == "External") and (defect_type == "Corrosion")
+    
+    overlap_note = ""
+    overlap_length = 0.0
+
+    if is_type_a:
+        # --- TYPE A LOGIC ---
+        # ISO 24817 / ASME PCC-2: For Type A, overlap is strictly controlled by 
+        # the larger of 50mm or the taper length (approx 3-5x thickness).
+        # We do NOT use the full shear calculation because the substrate is intact.
+        min_iso_overlap = 50.0
+        taper_allowance = 5.0 * final_thickness # Assuming a 5:1 taper/transition
+        
+        overlap_length = max(min_iso_overlap, taper_allowance)
+        overlap_note = "Type A (Geometry Controlled)"
+    
+    else:
+        # --- TYPE B LOGIC (Leaks, Internal, Cracks) ---
+        # The repair must transfer the FULL load via shear stress.
+        # Force = Thickness * Modulus * Strain
+        hoop_load = final_thickness * PROWRAP["modulus_circ"] * design_strain
+        allowable_shear = PROWRAP["lap_shear"] / safety_factor
+        
+        calculated_shear_overlap = hoop_load / allowable_shear
+        overlap_length = max(calculated_shear_overlap, 50.0)
+        overlap_note = "Type B (Shear Stress Controlled)"
+
+    # Total Repair Length
+    total_repair_length = length + (2 * overlap_length)
+
+    # --- 4. MATERIAL ESTIMATION ---
+    circumference_mm = math.pi * od
+    repair_area_m2 = (total_repair_length / 1000.0) * (circumference_mm / 1000.0) * num_plies
+    fabric_needed_m2 = repair_area_m2 * 1.15
+    composite_volume_m3 = (fabric_needed_m2 / 1.15) * (PROWRAP["ply_thickness"] / 1000.0)
+    resin_liters = composite_volume_m3 * 0.60 * 1000.0 * 1.2 
+
+    # --- 5. DISPLAY RESULTS ---
+    st.success("✅ Calculation Complete")
+
+    # Metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: st.metric("Number of Plies", f"{num_plies}", delta=f"{final_thickness:.2f} mm")
+    with col2: st.metric("Overlap Length", f"{overlap_length:.0f} mm", help=overlap_note)
+    with col3: st.metric("Total Repair Length", f"{total_repair_length:.0f} mm")
+    with col4: st.metric("Fabric Needed", f"{fabric_needed_m2:.2f} m²")
+
+    # Tabs
+    tab1, tab2 = st.tabs(["📋 Engineering Details", "📝 Method Statement"])
+    
+    with tab1:
+        st.subheader("Calculation Breakdown")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write(f"**Repair Class:** {'Type A (Non-through wall)' if is_type_a else 'Type B (Through-wall/Structural)'}")
+            st.write(f"**Overlap Logic:** {overlap_note}")
+            st.write(f"**Design Strain:** {design_strain*100:.3f}%")
+        with c2:
+            st.write(f"**Required Thickness:** {t_required:.3f} mm")
+            st.write(f"**Calculated Safety Factor:** {safety_factor:.2f}")
+            if not is_type_a:
+                st.write(f"**Required Shear Length:** {overlap_length:.1f} mm")
+        
+        st.divider()
+        # Pipe Yield Check
+        pipe_stress = (pressure_mpa * od) / (2 * rem_wall) if rem_wall > 0 else 9999
+        if pipe_stress > yield_strength:
+            st.warning(f"⚠️ Pipe Stress ({pipe_stress:.0f} MPa) > Yield ({yield_strength} MPa).")
+        else:
+            st.success(f"Pipe stress is within yield limits ({pipe_stress:.0f} < {yield_strength} MPa).")
+
+    with tab2:
+        st.subheader("Application Data")
+        st.json({
+            "Repair Type": "Type A" if is_type_a else "Type B",
+            "Surface Preparation": "SA 2.5 (Near White Metal)",
+            "Resin Mix Ratio": "Refer to Container",
+            "Cure Time": "24 Hours @ Ambient",
+            "Shore D Requirement": f"> {PROWRAP['shore_d']}",
+            "Resin Quantity": f"{resin_liters:.2f} Liters"
+        })
+
+if __name__ == "__main__":
+    main()
