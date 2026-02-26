@@ -10,7 +10,6 @@ st.set_page_config(
 )
 
 # --- 2. PROWRAP CERTIFIED DATA ---
-# Source: Prowrap Technical Data Sheet
 PROWRAP = {
     "ply_thickness": 0.83,        # mm
     "modulus_circ": 45460,        # MPa
@@ -145,9 +144,19 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     num_plies = math.ceil(t_required / PROWRAP["ply_thickness"])
     min_plies = 4 if defect_type == "Leak" else 2
     num_plies = max(num_plies, min_plies)
+    
+    # ---------------------------------------------------------
+    # --- DYNAMIC OVERRIDE: 3-LAYER UPGRADE LOGIC ---
+    # ---------------------------------------------------------
+    is_upgraded = False
+    if st.session_state.force_3_layers and num_plies < 3:
+        num_plies = 3
+        is_upgraded = True
+
     final_thickness = num_plies * PROWRAP["ply_thickness"]
 
     # --- F. ISO REPAIR LENGTH & OVERLAP ---
+    # NOTE: Because final_thickness updated above, all lengths dynamically update here!
     if "Type A" in calc_method_overlap:
         overlap_length = max(50.0, 3.0 * final_thickness)
     else:
@@ -167,6 +176,7 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     
     circumference_m = (math.pi * od) / 1000
     axial_procurement_m = procurement_axial_length / 1000
+    # NOTE: optimized_sqm applies num_plies across ALL bands automatically!
     optimized_sqm = axial_procurement_m * circumference_m * num_plies
     epoxy_kg = optimized_sqm * 1.2 
 
@@ -191,9 +201,19 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     m4.metric("Optimized Fabric", f"{optimized_sqm:.2f} m²")
     m5.metric("Epoxy Needed", f"{epoxy_kg:.1f} kg")
 
-    # PROTAP Recommendation logic
-    if num_plies == 2:
-        st.warning("⚠️ **PROTAP Recommendation:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment inline with ISO 24817.")
+    # --- INTERACTIVE PROTAP WARNING ---
+    st.markdown("---")
+    if num_plies == 2 and not is_upgraded:
+        col_warn, col_btn = st.columns([3, 1])
+        with col_warn:
+            st.warning("⚠️ **PROTAP Recommendation:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment inline with ISO 24817.")
+        with col_btn:
+            if st.button("⬆️ Do you want 3 layers?", use_container_width=True):
+                st.session_state.force_3_layers = True
+                st.rerun() # Instantly recalculates everything
+    elif is_upgraded:
+        st.info("ℹ️ **Design Upgraded:** Minimum 3 layers applied based on PROTAP recommendation for harsh environments.")
+    st.markdown("---")
 
     tab1, tab2 = st.tabs(["📊 Engineering Analysis", "📄 Method Statement"])
     
@@ -227,8 +247,7 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
         with c_defect:
             st.warning("**2. Defect Description**")
             st.markdown(f"""
-            - **Mechanism:** {defect_type}
-            - **Location:** {defect_loc}
+            - **Mechanism:** {defect_type} ({defect_loc})
             - **Remaining Wall:** {rem_wall} mm
             - **Axial Length:** {length} mm
             - **Wall Loss:** {wall_loss_ratio*100:.1f}%
@@ -252,9 +271,6 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
         4. **Wrapping:** Use **{num_bands} band(s)** of 300mm cloth.
         5. **Quality Control:** Minimum Shore D hardness of **{PROWRAP['shore_d']}** required.
         """)
-        
-        if num_plies == 2:
-            st.error("❗ **NOTE:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment inline with ISO 24817.")
 
     # --- J. PDF DOWNLOAD BUTTON ---
     st.divider()
@@ -269,12 +285,17 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     )
 
 def main():
+    # Initialize Session State Variables
+    if 'calc_active' not in st.session_state:
+        st.session_state.calc_active = False
+    if 'force_3_layers' not in st.session_state:
+        st.session_state.force_3_layers = False
+
     try:
         st.title("🔧 Prowrap Repair Master Calculator")
         st.markdown(f"**Standard:** ISO 24817 / ASME PCC-2 | **T-Limit:** {PROWRAP['max_temp']}°C")
         
         st.sidebar.header("1. Project Info")
-        # FIXED: Assigned inputs to variables so they can be passed to the PDF
         customer = st.sidebar.text_input("Customer", value="PROTAP")
         location = st.sidebar.text_input("Location", value="Turkey")
         report_no = st.sidebar.text_input("Report No", value="24-152")
@@ -297,8 +318,13 @@ def main():
         st.sidebar.header("5. Safety Settings")
         df = st.sidebar.number_input("Design Factor (f)", value=0.72, min_value=0.1, max_value=1.0)
         
+        # When Calculate is clicked, activate session state and reset the 3-layer override
         if st.sidebar.button("Calculate & Optimize", type="primary"):
-            # FIXED: Passed customer, location, and report_no into the function
+            st.session_state.calc_active = True
+            st.session_state.force_3_layers = False
+            
+        # Run calculation if active in session state
+        if st.session_state.calc_active:
             run_calculation(customer, location, report_no, od, wall, pres, temp, type_, loc_, len_, rem_, yield_str, df)
             
     except Exception as e:
