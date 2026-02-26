@@ -74,9 +74,34 @@ def create_pdf(report_data):
     })
 
     add_section("4. Material Procurement", {
-        "Fabric Needed (300mm Roll)": f"{report_data['optimized_sqm']:.2f} m2",
+        "Fabric Needed (300mm Roll)": f"{report_data['optimized_sqm']:.2f} sqm",
         "Epoxy Required": f"{report_data['epoxy_kg']:.1f} kg"
     })
+
+    # --- NEW: METHOD STATEMENT SECTION IN PDF ---
+    pdf.set_font("Arial", 'B', 12)
+    pdf.set_fill_color(200, 220, 255)
+    pdf.cell(0, 8, txt="5. Installation Checklist (Method Statement)", ln=True, fill=True)
+    pdf.set_font("Arial", '', 11)
+    
+    steps = [
+        "1. Surface Prep: Grit blast to SA 2.5; Profile >60 microns.",
+        "2. Primer/Filler: Apply Prowrap Filler to defect area to restore OD.",
+        f"3. Lamination: Saturate Carbon Cloth. Apply {report_data['num_plies']} layers per band.",
+        f"4. Wrapping: Use {report_data['num_bands']} band(s) of 300mm cloth.",
+        f"5. Quality Control: Minimum Shore D hardness of {PROWRAP['shore_d']} required."
+    ]
+    
+    for step in steps:
+        pdf.multi_cell(0, 6, txt=step)
+        
+    # Add red warning text to PDF if 2 layers
+    if report_data['num_plies'] == 2:
+        pdf.ln(2)
+        pdf.set_font("Arial", 'B', 10)
+        pdf.set_text_color(200, 0, 0) # Red color
+        pdf.multi_cell(0, 6, txt="NOTE: Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment inline with ISO 24817.")
+        pdf.set_text_color(0, 0, 0) # Reset to black
 
     try:
         return pdf.output(dest='S').encode('latin-1')
@@ -145,9 +170,7 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     min_plies = 4 if defect_type == "Leak" else 2
     num_plies = max(num_plies, min_plies)
     
-    # ---------------------------------------------------------
     # --- DYNAMIC OVERRIDE: 3-LAYER UPGRADE LOGIC ---
-    # ---------------------------------------------------------
     is_upgraded = False
     if st.session_state.force_3_layers and num_plies < 3:
         num_plies = 3
@@ -156,7 +179,6 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     final_thickness = num_plies * PROWRAP["ply_thickness"]
 
     # --- F. ISO REPAIR LENGTH & OVERLAP ---
-    # NOTE: Because final_thickness updated above, all lengths dynamically update here!
     if "Type A" in calc_method_overlap:
         overlap_length = max(50.0, 3.0 * final_thickness)
     else:
@@ -176,7 +198,6 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     
     circumference_m = (math.pi * od) / 1000
     axial_procurement_m = procurement_axial_length / 1000
-    # NOTE: optimized_sqm applies num_plies across ALL bands automatically!
     optimized_sqm = axial_procurement_m * circumference_m * num_plies
     epoxy_kg = optimized_sqm * 1.2 
 
@@ -210,7 +231,7 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
         with col_btn:
             if st.button("⬆️ Do you want 3 layers?", use_container_width=True):
                 st.session_state.force_3_layers = True
-                st.rerun() # Instantly recalculates everything
+                st.rerun() 
     elif is_upgraded:
         st.info("ℹ️ **Design Upgraded:** Minimum 3 layers applied based on PROTAP recommendation for harsh environments.")
     st.markdown("---")
