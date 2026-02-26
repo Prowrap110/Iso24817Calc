@@ -1,5 +1,6 @@
 import streamlit as st
 import math
+from fpdf import FPDF
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(
@@ -23,7 +24,67 @@ PROWRAP = {
     "stitching_overlap_mm": 50    
 }
 
-def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, rem_wall, yield_strength, design_factor):
+def create_pdf(report_data):
+    """Generates a PDF report and returns it as bytes."""
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Title
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, txt="PROWRAP COMPOSITE REPAIR REPORT", ln=True, align='C')
+    pdf.set_font("Arial", 'I', 10)
+    pdf.cell(0, 8, txt="Standard: ISO 24817 / ASME PCC-2", ln=True, align='C')
+    pdf.ln(5)
+
+    def add_section(title, data_dict):
+        pdf.set_font("Arial", 'B', 12)
+        pdf.set_fill_color(200, 220, 255)
+        pdf.cell(0, 8, txt=title, ln=True, fill=True)
+        pdf.set_font("Arial", '', 11)
+        for key, val in data_dict.items():
+            pdf.cell(90, 6, txt=f"{key}:", border=0)
+            pdf.cell(0, 6, txt=str(val), ln=True, border=0)
+        pdf.ln(5)
+
+    add_section("1. Project & Pipeline Data", {
+        "Customer": report_data['customer'],
+        "Location": report_data['location'],
+        "Report No": report_data['report_no'],
+        "Pipe Outer Diameter": f"{report_data['od']} mm",
+        "Nominal Wall Thickness": f"{report_data['wall']} mm",
+        "Pipe Yield Strength": f"{report_data['yield_str']} MPa",
+        "Design Pressure": f"{report_data['pressure']} bar",
+        "Operating Temperature": f"{report_data['temp']} C"
+    })
+
+    add_section("2. Defect Assessment", {
+        "Defect Mechanism": report_data['defect_type'],
+        "Defect Location": report_data['defect_loc'],
+        "Remaining Wall": f"{report_data['rem_wall']} mm",
+        "Axial Length": f"{report_data['length']} mm",
+        "Wall Loss": f"{report_data['wall_loss_ratio']*100:.1f} %",
+        "Repair Logic": report_data['calc_method_thick']
+    })
+
+    add_section("3. Optimized Repair Design", {
+        "Required Plies": f"{report_data['num_plies']} Layers",
+        "Repair Thickness": f"{report_data['final_thickness']:.2f} mm",
+        "Min. Required ISO Length": f"{report_data['iso_length']:.0f} mm",
+        "Procurement Length": f"{report_data['proc_length']} mm ({report_data['num_bands']} Bands)",
+        "Calculated Safety Factor": f"{report_data['sf']:.2f}"
+    })
+
+    add_section("4. Material Procurement", {
+        "Fabric Needed (300mm Roll)": f"{report_data['optimized_sqm']:.2f} m2",
+        "Epoxy Required": f"{report_data['epoxy_kg']:.1f} kg"
+    })
+
+    try:
+        return pdf.output(dest='S').encode('latin-1')
+    except AttributeError:
+        return bytes(pdf.output())
+
+def run_calculation(customer, location, report_no, od, wall, pressure, temp, defect_type, defect_loc, length, rem_wall, yield_strength, design_factor):
     # --- A. VALIDATION ---
     errors = []
     if temp > PROWRAP["max_temp"]:
@@ -109,7 +170,18 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
     optimized_sqm = axial_procurement_m * circumference_m * num_plies
     epoxy_kg = optimized_sqm * 1.2 
 
-    # --- H. DISPLAY RESULTS ---
+    # --- H. COMPILE REPORT DATA ---
+    report_data = {
+        "customer": customer, "location": location, "report_no": report_no,
+        "od": od, "wall": wall, "yield_str": yield_strength, "pressure": pressure, "temp": temp,
+        "defect_type": defect_type, "defect_loc": defect_loc, "rem_wall": rem_wall, "length": length,
+        "wall_loss_ratio": wall_loss_ratio, "calc_method_thick": calc_method_thick,
+        "num_plies": num_plies, "final_thickness": final_thickness, "iso_length": total_repair_length_calc,
+        "num_bands": num_bands, "proc_length": procurement_axial_length, "sf": safety_factor,
+        "optimized_sqm": optimized_sqm, "epoxy_kg": epoxy_kg
+    }
+
+    # --- I. DISPLAY RESULTS ---
     st.success(f"✅ Calculation Complete")
 
     m1, m2, m3, m4, m5 = st.columns(5)
@@ -184,14 +256,28 @@ def run_calculation(od, wall, pressure, temp, defect_type, defect_loc, length, r
         if num_plies == 2:
             st.error("❗ **NOTE:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment inline with ISO 24817.")
 
+    # --- J. PDF DOWNLOAD BUTTON ---
+    st.divider()
+    pdf_bytes = create_pdf(report_data)
+    
+    st.download_button(
+        label="📄 Download Report as PDF",
+        data=pdf_bytes,
+        file_name=f"Prowrap_Repair_{report_no}.pdf",
+        mime="application/pdf",
+        type="primary"
+    )
+
 def main():
     try:
         st.title("🔧 Prowrap Repair Master Calculator")
         st.markdown(f"**Standard:** ISO 24817 / ASME PCC-2 | **T-Limit:** {PROWRAP['max_temp']}°C")
         
         st.sidebar.header("1. Project Info")
-        st.sidebar.text_input("Customer", value="PROTAP")
-        st.sidebar.text_input("Location", value="Turkey")
+        # FIXED: Assigned inputs to variables so they can be passed to the PDF
+        customer = st.sidebar.text_input("Customer", value="PROTAP")
+        location = st.sidebar.text_input("Location", value="Turkey")
+        report_no = st.sidebar.text_input("Report No", value="24-152")
         
         st.sidebar.header("2. Pipeline Data")
         od = st.sidebar.number_input("Pipe OD [mm]", value=457.2)
@@ -212,7 +298,8 @@ def main():
         df = st.sidebar.number_input("Design Factor (f)", value=0.72, min_value=0.1, max_value=1.0)
         
         if st.sidebar.button("Calculate & Optimize", type="primary"):
-            run_calculation(od, wall, pres, temp, type_, loc_, len_, rem_, yield_str, df)
+            # FIXED: Passed customer, location, and report_no into the function
+            run_calculation(customer, location, report_no, od, wall, pres, temp, type_, loc_, len_, rem_, yield_str, df)
             
     except Exception as e:
         st.error(f"⚠️ Application Error: {e}")
