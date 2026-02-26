@@ -18,7 +18,7 @@ PROWRAP = {
     "strain_fail": 0.0233,        # 2.33%
     "lap_shear": 7.37,            # MPa
     "max_temp": 55.5,             # °C
-    "shore_d": 79.1,              #
+    "shore_d": 70,                # Updated from 79.1 to 70
     "cloth_width_mm": 300,        
     "stitching_overlap_mm": 50    
 }
@@ -78,7 +78,7 @@ def create_pdf(report_data):
         "Epoxy Required": f"{report_data['epoxy_kg']:.1f} kg"
     })
 
-    # --- NEW: METHOD STATEMENT SECTION IN PDF ---
+    # --- METHOD STATEMENT SECTION IN PDF ---
     pdf.set_font("Arial", 'B', 12)
     pdf.set_fill_color(200, 220, 255)
     pdf.cell(0, 8, txt="5. Installation Checklist (Method Statement)", ln=True, fill=True)
@@ -89,7 +89,7 @@ def create_pdf(report_data):
         "2. Primer/Filler: Apply Prowrap Filler to defect area to restore OD.",
         f"3. Lamination: Saturate Carbon Cloth. Apply {report_data['num_plies']} layers per band.",
         f"4. Wrapping: Use {report_data['num_bands']} band(s) of 300mm cloth.",
-        f"5. Quality Control: Minimum Shore D hardness of {PROWRAP['shore_d']} required."
+        f"5. Quality Control: Minimum average Shore D hardness of {PROWRAP['shore_d']} required."
     ]
     
     for step in steps:
@@ -290,7 +290,7 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
         2. **Primer/Filler:** Apply Prowrap Filler to defect area to restore OD.
         3. **Lamination:** Saturate Carbon Cloth. Apply **{num_plies} layers** per band.
         4. **Wrapping:** Use **{num_bands} band(s)** of 300mm cloth.
-        5. **Quality Control:** Minimum Shore D hardness of **{PROWRAP['shore_d']}** required.
+        5. **Quality Control:** Minimum average Shore D hardness of **{PROWRAP['shore_d']}** required.
         """)
 
     # --- J. PDF DOWNLOAD BUTTON ---
