@@ -23,6 +23,19 @@ PROWRAP = {
     "stitching_overlap_mm": 50    
 }
 
+def safe_text(text):
+    """Safely replaces Turkish/Special characters to prevent PDF encoding crashes."""
+    if not isinstance(text, str):
+        return str(text)
+    replacements = {
+        'ı': 'i', 'İ': 'I', 'ş': 's', 'Ş': 'S', 
+        'ğ': 'g', 'Ğ': 'G', 'ü': 'u', 'Ü': 'U', 
+        'ö': 'o', 'Ö': 'O', 'ç': 'c', 'Ç': 'C'
+    }
+    for tr, eng in replacements.items():
+        text = text.replace(tr, eng)
+    return text
+
 def create_pdf(report_data):
     """Generates a PDF report and returns it as bytes."""
     pdf = FPDF()
@@ -41,8 +54,8 @@ def create_pdf(report_data):
         pdf.cell(0, 8, txt=title, ln=True, fill=True)
         pdf.set_font("Arial", '', 11)
         for key, val in data_dict.items():
-            pdf.cell(90, 6, txt=f"{key}:", border=0)
-            pdf.cell(0, 6, txt=str(val), ln=True, border=0)
+            pdf.cell(90, 6, txt=safe_text(f"{key}:"), border=0)
+            pdf.cell(0, 6, txt=safe_text(str(val)), ln=True, border=0)
         pdf.ln(5)
 
     add_section("1. Project & Pipeline Data", {
@@ -70,7 +83,7 @@ def create_pdf(report_data):
         "Repair Thickness": f"{report_data['final_thickness']:.2f} mm",
         "Min. Required ISO Length": f"{report_data['iso_length']:.0f} mm",
         "Procurement Length": f"{report_data['proc_length']} mm ({report_data['num_bands']} Bands)",
-        "Design Factor": f"{report_data['design_factor']}"  # UPDATED: Shows Design Factor
+        "Design Factor": f"{report_data['design_factor']}"
     })
 
     add_section("4. Material Procurement", {
@@ -93,23 +106,22 @@ def create_pdf(report_data):
     ]
     
     for step in steps:
-        pdf.multi_cell(0, 6, txt=step)
+        pdf.multi_cell(0, 6, txt=safe_text(step))
         
-    # Add red warning text to PDF if 2 layers
     if report_data['num_plies'] == 2:
         pdf.ln(2)
         pdf.set_font("Arial", 'B', 10)
-        pdf.set_text_color(200, 0, 0) # Red color
+        pdf.set_text_color(200, 0, 0)
         pdf.multi_cell(0, 6, txt="NOTE: Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment inline with ISO 24817.")
-        pdf.set_text_color(0, 0, 0) # Reset to black
+        pdf.set_text_color(0, 0, 0)
 
-    try:
-        return pdf.output(dest='S').encode('latin-1')
-    except AttributeError:
-        return bytes(pdf.output())
+    # Safe PDF output across different fpdf versions
+    output = pdf.output(dest='S')
+    if isinstance(output, str):
+        return output.encode('latin-1', 'replace')
+    return bytes(output)
 
 def run_calculation(customer, location, report_no, od, wall, pressure, temp, defect_type, defect_loc, length, rem_wall, yield_strength, design_factor):
-    # --- A. VALIDATION ---
     errors = []
     if temp > PROWRAP["max_temp"]:
         errors.append(f"❌ **CRITICAL:** Operating temperature ({temp}°C) exceeds Prowrap limit of {PROWRAP['max_temp']}°C.")
@@ -119,7 +131,6 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
         for err in errors: st.error(err)
         return
 
-    # --- B. DEFECT ASSESSMENT & REPAIR CLASS ---
     wall_loss_ratio = (wall - rem_wall) / wall
     is_severe_loss = wall_loss_ratio > 0.65
     
@@ -140,12 +151,10 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
         calc_method_thick = "Type B (Total Replacement)"
         calc_method_overlap = "Type B (Shear Controlled)"
 
-    # --- C. SAFETY & STRAIN ---
     safety_factor = 1.0 / design_factor
     temp_factor = 0.95 if temp > 40 else 1.0
     design_strain = (PROWRAP["strain_fail"] * temp_factor) / safety_factor
 
-    # --- D. PIPE CAPACITY ---
     pressure_mpa = pressure * 0.1
     allowable_steel_stress = yield_strength * design_factor
     theoretical_capacity = (2 * allowable_steel_stress * rem_wall) / od
@@ -155,7 +164,6 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     else:
         p_steel_capacity = theoretical_capacity
 
-    # --- E. THICKNESS & PLY COUNT ---
     if "Type A" in calc_method_thick and p_steel_capacity > 0:
         p_composite_design = max(0, pressure_mpa - p_steel_capacity)
     else:
@@ -170,7 +178,6 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     min_plies = 4 if defect_type == "Leak" else 2
     num_plies = max(num_plies, min_plies)
     
-    # --- DYNAMIC OVERRIDE: 3-LAYER UPGRADE LOGIC ---
     is_upgraded = False
     if st.session_state.force_3_layers and num_plies < 3:
         num_plies = 3
@@ -178,7 +185,6 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
 
     final_thickness = num_plies * PROWRAP["ply_thickness"]
 
-    # --- F. ISO REPAIR LENGTH & OVERLAP ---
     if "Type A" in calc_method_overlap:
         overlap_length = max(50.0, 3.0 * final_thickness)
     else:
@@ -188,7 +194,6 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
 
     total_repair_length_calc = length + (2 * overlap_length)
 
-    # --- G. MATERIAL OPTIMIZATION ---
     if total_repair_length_calc <= PROWRAP["cloth_width_mm"]:
         num_bands = 1
         procurement_axial_length = 300
@@ -201,7 +206,6 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     optimized_sqm = axial_procurement_m * circumference_m * num_plies
     epoxy_kg = optimized_sqm * 1.2 
 
-    # --- H. COMPILE REPORT DATA ---
     report_data = {
         "customer": customer, "location": location, "report_no": report_no,
         "od": od, "wall": wall, "yield_str": yield_strength, "pressure": pressure, "temp": temp,
@@ -209,11 +213,10 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
         "wall_loss_ratio": wall_loss_ratio, "calc_method_thick": calc_method_thick,
         "num_plies": num_plies, "final_thickness": final_thickness, "iso_length": total_repair_length_calc,
         "num_bands": num_bands, "proc_length": procurement_axial_length, "sf": safety_factor,
-        "design_factor": design_factor,  # UPDATED: Added Design Factor to report data
+        "design_factor": design_factor, 
         "optimized_sqm": optimized_sqm, "epoxy_kg": epoxy_kg
     }
 
-    # --- I. DISPLAY RESULTS ---
     st.success(f"✅ Calculation Complete")
 
     m1, m2, m3, m4, m5 = st.columns(5)
@@ -223,7 +226,6 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     m4.metric("Optimized Fabric", f"{optimized_sqm:.2f} m²")
     m5.metric("Epoxy Needed", f"{epoxy_kg:.1f} kg")
 
-    # --- INTERACTIVE PROTAP WARNING ---
     st.markdown("---")
     if num_plies == 2 and not is_upgraded:
         col_warn, col_btn = st.columns([3, 1])
@@ -250,7 +252,7 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
             st.markdown("### Structural Design")
             st.write(f"**Composite Design Pressure:** {p_composite_design:.2f} MPa")
             st.write(f"**Design Strain Limit:** {design_strain*100:.3f}%")
-            st.write(f"**Design Factor (f):** {design_factor}") # UPDATED: Shows Design Factor instead of SF
+            st.write(f"**Design Factor (f):** {design_factor}")
 
     with tab2:
         st.markdown("## 🛠️ Prowrap Repair Method Statement")
@@ -294,20 +296,26 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
         5. **Quality Control:** Minimum average Shore D hardness of **{PROWRAP['shore_d']}** required.
         """)
 
-    # --- J. PDF DOWNLOAD BUTTON ---
+    # --- J. PDF DOWNLOAD GENERATOR WITH ERROR CATCHING ---
     st.divider()
-    pdf_bytes = create_pdf(report_data)
-    
-    st.download_button(
-        label="📄 Download Report as PDF",
-        data=pdf_bytes,
-        file_name=f"Prowrap_Repair_{report_no}.pdf",
-        mime="application/pdf",
-        type="primary"
-    )
+    try:
+        pdf_bytes = create_pdf(report_data)
+        st.download_button(
+            label="📄 Download Report as PDF",
+            data=pdf_bytes,
+            file_name=f"Prowrap_Repair_{safe_text(report_no)}.pdf",
+            mime="application/pdf",
+            type="primary"
+        )
+    except Exception as pdf_error:
+        st.error(f"⚠️ Could not generate PDF. Error details: {pdf_error}")
+
+# A helper function to reset calculation state when a user types a new input
+def reset_calc():
+    st.session_state.calc_active = False
+    st.session_state.force_3_layers = False
 
 def main():
-    # Initialize Session State Variables
     if 'calc_active' not in st.session_state:
         st.session_state.calc_active = False
     if 'force_3_layers' not in st.session_state:
@@ -318,34 +326,32 @@ def main():
         st.markdown(f"**Standard:** ISO 24817 / ASME PCC-2 | **T-Limit:** {PROWRAP['max_temp']}°C")
         
         st.sidebar.header("1. Project Info")
-        customer = st.sidebar.text_input("Customer", value="PROTAP")
-        location = st.sidebar.text_input("Location", value="Turkey")
-        report_no = st.sidebar.text_input("Report No", value="24-152")
+        customer = st.sidebar.text_input("Customer", value="PROTAP", on_change=reset_calc)
+        location = st.sidebar.text_input("Location", value="Turkey", on_change=reset_calc)
+        report_no = st.sidebar.text_input("Report No", value="24-152", on_change=reset_calc)
         
         st.sidebar.header("2. Pipeline Data")
-        od = st.sidebar.number_input("Pipe OD [mm]", value=457.2)
-        wall = st.sidebar.number_input("Nominal Wall [mm]", value=9.53)
-        yield_str = st.sidebar.number_input("Pipe Yield [MPa]", value=359.0)
+        od = st.sidebar.number_input("Pipe OD [mm]", value=457.2, on_change=reset_calc)
+        wall = st.sidebar.number_input("Nominal Wall [mm]", value=9.53, on_change=reset_calc)
+        yield_str = st.sidebar.number_input("Pipe Yield [MPa]", value=359.0, on_change=reset_calc)
         
         st.sidebar.header("3. Service Conditions")
-        pres = st.sidebar.number_input("Design Pressure [bar]", value=50.0)
-        temp = st.sidebar.number_input("Op. Temperature [°C]", value=40.0)
+        pres = st.sidebar.number_input("Design Pressure [bar]", value=50.0, on_change=reset_calc)
+        temp = st.sidebar.number_input("Op. Temperature [°C]", value=40.0, on_change=reset_calc)
         
         st.sidebar.header("4. Defect Data")
-        type_ = st.sidebar.selectbox("Mechanism", ["Corrosion", "Dent", "Leak", "Crack"])
-        loc_ = st.sidebar.selectbox("Location", ["External", "Internal"])
-        len_ = st.sidebar.number_input("Defect Length [mm]", value=100.0)
-        rem_ = st.sidebar.number_input("Remaining Wall [mm]", value=4.5)
+        type_ = st.sidebar.selectbox("Mechanism", ["Corrosion", "Dent", "Leak", "Crack"], on_change=reset_calc)
+        loc_ = st.sidebar.selectbox("Location", ["External", "Internal"], on_change=reset_calc)
+        len_ = st.sidebar.number_input("Defect Length [mm]", value=100.0, on_change=reset_calc)
+        rem_ = st.sidebar.number_input("Remaining Wall [mm]", value=4.5, on_change=reset_calc)
         
         st.sidebar.header("5. Safety Settings")
-        df = st.sidebar.number_input("Design Factor (f)", value=0.72, min_value=0.1, max_value=1.0)
+        df = st.sidebar.number_input("Design Factor (f)", value=0.72, min_value=0.1, max_value=1.0, on_change=reset_calc)
         
-        # When Calculate is clicked, activate session state and reset the 3-layer override
         if st.sidebar.button("Calculate & Optimize", type="primary"):
             st.session_state.calc_active = True
             st.session_state.force_3_layers = False
             
-        # Run calculation if active in session state
         if st.session_state.calc_active:
             run_calculation(customer, location, report_no, od, wall, pres, temp, type_, loc_, len_, rem_, yield_str, df)
             
