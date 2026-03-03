@@ -85,6 +85,13 @@ def create_pdf(report_data):
         "Procurement Length": f"{report_data['proc_length']} mm ({report_data['num_bands']} Bands)",
         "Design Factor": f"{report_data['design_factor']}"
     })
+    
+    # Add the ISO Note to the PDF directly under the Design section
+    pdf.set_font("Arial", 'I', 9)
+    pdf.set_text_color(100, 100, 100) # Dark grey for note
+    pdf.multi_cell(0, 5, txt=safe_text(f"* Note: This repair design was calculated in accordance with ISO 24817 (Table 9, p. 24) based on a specified design life of {report_data['design_life']} years."))
+    pdf.set_text_color(0, 0, 0) # Reset to black
+    pdf.ln(5)
 
     add_section("4. Material Procurement", {
         "Fabric Needed (300mm Roll)": f"{report_data['optimized_sqm']:.2f} sqm",
@@ -121,7 +128,7 @@ def create_pdf(report_data):
         return output.encode('latin-1', 'replace')
     return bytes(output)
 
-def run_calculation(customer, location, report_no, od, wall, pressure, temp, defect_type, defect_loc, length, rem_wall, yield_strength, design_factor):
+def run_calculation(customer, location, report_no, od, wall, pressure, temp, defect_type, defect_loc, length, rem_wall, yield_strength, design_factor, design_life):
     errors = []
     if temp > PROWRAP["max_temp"]:
         errors.append(f"❌ **CRITICAL:** Operating temperature ({temp}°C) exceeds Prowrap limit of {PROWRAP['max_temp']}°C.")
@@ -213,7 +220,7 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
         "wall_loss_ratio": wall_loss_ratio, "calc_method_thick": calc_method_thick,
         "num_plies": num_plies, "final_thickness": final_thickness, "iso_length": total_repair_length_calc,
         "num_bands": num_bands, "proc_length": procurement_axial_length, "sf": safety_factor,
-        "design_factor": design_factor, 
+        "design_factor": design_factor, "design_life": design_life, 
         "optimized_sqm": optimized_sqm, "epoxy_kg": epoxy_kg
     }
 
@@ -285,6 +292,8 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
             - **Procurement Len:** {procurement_axial_length} mm
             - **Epoxy Total:** {epoxy_kg:.1f} kg
             """)
+            # Add the ISO Note to the UI dynamically
+            st.caption(f"*Note: This repair design was calculated in accordance with ISO 24817 (Table 9, p. 24) based on a specified design life of {design_life} years.*")
 
         st.markdown("---")
         st.markdown("### 📋 Installation Checklist")
@@ -345,7 +354,8 @@ def main():
         len_ = st.sidebar.number_input("Defect Length [mm]", value=100.0, on_change=reset_calc)
         rem_ = st.sidebar.number_input("Remaining Wall [mm]", value=4.5, on_change=reset_calc)
         
-        st.sidebar.header("5. Safety Settings")
+        st.sidebar.header("5. Safety & Design Settings")
+        design_life = st.sidebar.number_input("Design Life [years]", value=20, min_value=1, on_change=reset_calc)
         df = st.sidebar.number_input("Design Factor (f)", value=0.72, min_value=0.1, max_value=1.0, on_change=reset_calc)
         
         if st.sidebar.button("Calculate & Optimize", type="primary"):
@@ -353,7 +363,7 @@ def main():
             st.session_state.force_3_layers = False
             
         if st.session_state.calc_active:
-            run_calculation(customer, location, report_no, od, wall, pres, temp, type_, loc_, len_, rem_, yield_str, df)
+            run_calculation(customer, location, report_no, od, wall, pres, temp, type_, loc_, len_, rem_, yield_str, df, design_life)
             
     except Exception as e:
         st.error(f"⚠️ Application Error: {e}")
