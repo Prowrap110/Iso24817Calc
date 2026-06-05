@@ -10,17 +10,32 @@ st.set_page_config(
 )
 
 # --- 2. PROWRAP CERTIFIED DATA ---
+# Source: ISO TS24817 and ASME PCC-2 PROWRAP HPTP repair system
+# qualification data, selected test methods listed in Test Data.pdf.
 PROWRAP = {
-    "ply_thickness": 0.83,        # mm
-    "modulus_circ": 45460,        # MPa
-    "modulus_axial": 43800,       # MPa
-    "tensile_strength": 574.1,    # MPa
-    "strain_fail": 0.0233,        # 2.33%
-    "lap_shear": 7.37,            # MPa
-    "max_temp": 55.5,             # °C
-    "shore_d": 70,                # 
-    "cloth_width_mm": 300,        
-    "stitching_overlap_mm": 50    
+    "ply_thickness": 0.83,             # mm, ISO 527-4
+    "modulus_circ": 45460,             # MPa, ISO 527-4
+    "strain_fail": 0.0233,             # mm/mm, circumferential, ISO 527-4
+    "tensile_strength": 574.1,         # MPa, circumferential, ISO 527-4
+    "modulus_axial": 43800,            # MPa, ISO 527-4
+    "strain_fail_axial": 0.0243,       # mm/mm, axial, ISO 527-4
+    "tensile_strength_axial": 563.67,  # MPa, axial, ISO 527-4
+    "poisson_circ": 0.066,             # ISO 527-4
+    "compressive_modulus": 3310,       # MPa, ISO 604
+    "compressive_strength": 85.58,     # MPa, ISO 604
+    "shear_modulus": 2450,             # MPa, ASTM D5379
+    "shore_d": 79.1,                   # Shore D, ISO 868
+    "glass_transition_temp": 78.18,    # °C, mid Tg, ISO 11357-2
+    "peak_exotherm_temp": 104,         # °C, ISO 11357-2
+    "thermal_expansion_circ": 10.34,   # ppm/K, circumferential, ASTM E831
+    "thermal_expansion_axial": 22.81,  # ppm/K, axial, ASTM E831
+    "lap_shear": 14.7,                 # MPa, ASTM D3165
+    "long_term_lap_shear": 9.62,       # MPa, ASTM D3165
+    "impact_peak_energy": 41.982,      # J, ASTM D7136
+    "short_term_survival": "PASS",     # ISO 24817
+    "max_temp": 58.18,                 # °C, Tg minus 20 °C design limit
+    "cloth_width_mm": 300,
+    "stitching_overlap_mm": 50
 }
 
 def safe_text(text):
