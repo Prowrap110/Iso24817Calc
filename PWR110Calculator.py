@@ -5,6 +5,7 @@ from prowrap_calculations import (
     apply_type_a_class3_result_to_repair,
     calculate_repair,
     calculate_type_a_class3_prowrap_check,
+    substrate_credit_bar_for_iso_check,
 )
 from prowrap_materials import PROWRAP
 
@@ -136,7 +137,6 @@ def run_calculation(
     design_factor,
     design_life,
     show_typea_class3_check=False,
-    substrate_allowable_pressure=0.0,
     installation_temp=20.0,
     component_type="Straight",
     cyclic_derating_factor=1.0,
@@ -176,11 +176,12 @@ def run_calculation(
     p_composite_design = report_data["p_composite_design"]
     design_strain = report_data["design_strain"]
     num_bands = report_data["num_bands"]
+    substrate_allowable_pressure = substrate_credit_bar_for_iso_check(report_data)
     typea_class3_result = None
     typea_class3_note = None
 
     if show_typea_class3_check:
-        if defect_type == "Corrosion" and defect_loc == "External":
+        if defect_loc == "External" and defect_type not in ["Crack", "Leak"]:
             try:
                 typea_class3_result = calculate_type_a_class3_prowrap_check(
                     od=od,
@@ -197,7 +198,7 @@ def run_calculation(
                 typea_class3_note = str(exc)
         else:
             typea_class3_note = (
-                "Type A / Class 3 check is limited to external corrosion cases in this version."
+                "Type A / Class 3 check requires an external non-crack/non-leak defect in this version."
             )
 
     if typea_class3_result:
@@ -252,6 +253,10 @@ def run_calculation(
             st.markdown("### ISO Type A / Class 3 Check")
             if typea_class3_result:
                 st.write("**Basis:** PRW110 20-year long-term strain = 0.55%.")
+                st.write(
+                    f"**Substrate Credit:** {substrate_allowable_pressure:.1f} bar "
+                    f"({substrate_allowable_pressure * 0.1:.2f} MPa effective pipe capacity)"
+                )
                 st.write(f"**Final Thickness:** {typea_class3_result['tdesign_final_mm']:.2f} mm")
                 st.write(f"**Layer Count:** {typea_class3_result['layer_count']}")
                 st.write(f"**Required Overlap:** {typea_class3_result['lover_required_mm']:.1f} mm")
@@ -361,7 +366,7 @@ def main():
 
         st.sidebar.header("6. ISO Type A / Class 3 Check")
         show_typea_class3_check = st.sidebar.checkbox("Show Type A / Class 3 check", value=True, on_change=reset_calc)
-        substrate_allowable_pressure = st.sidebar.number_input("Allowable substrate pressure [bar]", value=0.0, min_value=0.0, on_change=reset_calc)
+        st.sidebar.caption("For external non-crack/non-leak defects, substrate credit is automatically taken from effective pipe capacity.")
         installation_temp = st.sidebar.number_input("Installation temperature [°C]", value=20.0, on_change=reset_calc)
         component_type = st.sidebar.selectbox("Component type", ["Straight", "Bend", "Tee", "Flange", "Reducer"], on_change=reset_calc)
         cyclic_derating_factor = st.sidebar.number_input("Cyclic derating factor", value=1.0, min_value=0.01, max_value=1.0, on_change=reset_calc)
@@ -387,7 +392,6 @@ def main():
                 df,
                 design_life,
                 show_typea_class3_check,
-                substrate_allowable_pressure,
                 installation_temp,
                 component_type,
                 cyclic_derating_factor,

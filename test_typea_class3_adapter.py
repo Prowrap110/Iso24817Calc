@@ -4,6 +4,7 @@ from prowrap_calculations import (
     apply_type_a_class3_result_to_repair,
     calculate_repair,
     calculate_type_a_class3_prowrap_check,
+    substrate_credit_bar_for_iso_check,
 )
 from prowrap_materials import PROWRAP
 
@@ -68,6 +69,69 @@ class TypeAClass3AdapterTest(unittest.TestCase):
         self.assertAlmostEqual(updated["iso_length"], 100.0 + 2 * iso_result["lover_required_mm"])
         self.assertEqual(updated["num_bands"], 3)
         self.assertEqual(updated["proc_length"], 900)
+
+    def test_external_non_leak_crack_uses_effective_pipe_capacity_as_substrate_credit(self):
+        repair = calculate_repair(
+            customer="PROTAP",
+            location="Turkey",
+            report_no="24-152",
+            od=457.2,
+            wall=9.53,
+            pressure=50.0,
+            temp=40.0,
+            defect_type="Corrosion",
+            defect_loc="External",
+            length=100.0,
+            rem_wall=4.5,
+            yield_strength=359.0,
+            design_factor=0.72,
+            design_life=20,
+        )
+
+        credit_bar = substrate_credit_bar_for_iso_check(repair)
+        iso_result = calculate_type_a_class3_prowrap_check(
+            od=457.2,
+            pressure_bar=50.0,
+            temp=40.0,
+            rem_wall=4.5,
+            design_life=20,
+            substrate_allowable_pressure_bar=credit_bar,
+        )
+        updated = apply_type_a_class3_result_to_repair(repair, iso_result)
+
+        self.assertAlmostEqual(credit_bar, repair["p_steel_capacity"] * 10.0)
+        self.assertGreaterEqual(credit_bar, 50.0)
+        self.assertEqual(updated["num_plies"], 8)
+        self.assertAlmostEqual(
+            iso_result["input_summary"]["substrate_allowable_pressure_bar"],
+            credit_bar,
+        )
+
+    def test_leak_crack_and_internal_do_not_get_substrate_credit(self):
+        for defect_type, defect_loc in [
+            ("Leak", "External"),
+            ("Crack", "External"),
+            ("Corrosion", "Internal"),
+        ]:
+            with self.subTest(defect_type=defect_type, defect_loc=defect_loc):
+                repair = calculate_repair(
+                    customer="PROTAP",
+                    location="Turkey",
+                    report_no="24-152",
+                    od=457.2,
+                    wall=9.53,
+                    pressure=50.0,
+                    temp=40.0,
+                    defect_type=defect_type,
+                    defect_loc=defect_loc,
+                    length=100.0,
+                    rem_wall=4.5,
+                    yield_strength=359.0,
+                    design_factor=0.72,
+                    design_life=20,
+                )
+
+                self.assertEqual(substrate_credit_bar_for_iso_check(repair), 0.0)
 
 
 if __name__ == "__main__":

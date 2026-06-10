@@ -252,6 +252,15 @@ def calculate_type_a_class3_prowrap_check(
 calculate_type_a_class3_fallback_check = calculate_type_a_class3_prowrap_check
 
 
+def substrate_credit_bar_for_iso_check(repair_data):
+    """Return the substrate pressure credit for ISO checks in bar."""
+    if repair_data["defect_loc"] != "External":
+        return 0.0
+    if repair_data["defect_type"] in {"Crack", "Leak"}:
+        return 0.0
+    return max(0.0, repair_data["p_steel_capacity"] * 10.0)
+
+
 def apply_type_a_class3_result_to_repair(repair_data, typea_class3_result):
     """Use the ISO Type A/Class 3 result as the controlling displayed repair design."""
     updated = dict(repair_data)
