@@ -260,6 +260,8 @@ def run_calculation(
             type_b_details = report_data.get("type_b_details")
             if type_b_details:
                 st.markdown("### Type B Check (ISO Formula 12)")
+                st.write(f"**Type B Service Life:** {type_b_details['design_life_years']:.0f} years (capped; revalidate thereafter)")
+                st.write(f"**Type B Temp Limit:** {type_b_details['service_temp_limit_c']:.1f} °C")
                 st.write(f"**gamma_LCL:** {type_b_details['gamma_lcl_j_m2']:.0f} J/m²")
                 st.write(f"**Defect Size (end of life):** {type_b_details['defect_size_used_mm']:.0f} mm")
                 st.write(f"**f_leak (Formula 16):** {type_b_details['fleak']:.3f}")

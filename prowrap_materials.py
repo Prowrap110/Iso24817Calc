@@ -31,6 +31,8 @@ PROWRAP = {
                                        # ISO 24817 Annex D (Type B / Formula 12 route)
     "type_b_min_layers": 3,            # ISO 24817 7.5.14 / Annex F impact-qualified
                                        # minimum layer count for Type B repairs
+    "type_b_max_life_years": 2,        # Type B (through-wall) service life cap;
+                                       # revalidation required beyond this
     "impact_peak_energy": 41.982,      # J, ASTM D7136
     "short_term_survival": "PASS",     # ISO 24817
     "max_temp": 58.18,                 # degC, Tg minus 20 degC design limit

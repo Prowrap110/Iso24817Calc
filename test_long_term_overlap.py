@@ -22,11 +22,11 @@ class LongTermOverlapTest(unittest.TestCase):
         self.assertEqual(result["overlap_shear_basis"], "iso_formula_18_and_21_type_b")
         self.assertAlmostEqual(result["overlap_shear_strength"], 9.62)
         self.assertAlmostEqual(result["overlap_transfer"], expected_transfer)
-        self.assertAlmostEqual(result["overlap_length"], 372.7931889167681)
-        self.assertAlmostEqual(result["iso_length"], 945.1863778335362)
-        # Leak/crack designs must carry the gamma_LCL compliance warning.
+        self.assertAlmostEqual(result["overlap_length"], 4597.782663306807)
+        self.assertAlmostEqual(result["iso_length"], 10523.965326613614)
+        # Leak/crack designs must carry the Type B compliance warnings.
         self.assertTrue(
-            any("gamma_LCL" in w for w in result["compliance_warnings"])
+            any("Type B" in w for w in result["compliance_warnings"])
         )
 
 

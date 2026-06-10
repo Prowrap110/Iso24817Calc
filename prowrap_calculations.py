@@ -78,8 +78,15 @@ def iso_type_b_min_thickness(
 
     # Formula (16), Class 3 service factor.
     fleak = 0.666 * 10 ** (-0.01584 * (design_life_years - 1.0))
+    # Upper service temperature limit (Table 6): Class 3 Type B repairs with
+    # lifetime > 2 years are limited to Tg - 30 (stricter than the Tg - 20
+    # Type A limit).
+    if design_life_years > 2:
+        tm_type_b = PROWRAP["glass_transition_temp"] - 30.0
+    else:
+        tm_type_b = PROWRAP["max_temp"]
     # Table 8 polynomial; Ttest == Tamb in the PRW110 qualification.
-    ft2_delta = PROWRAP["max_temp"] - design_temp_c
+    ft2_delta = tm_type_b - design_temp_c
     ft2 = 0.0000625 * ft2_delta**2 + 0.00125 * ft2_delta + 0.7
 
     def allowable_pressure(t):
@@ -97,6 +104,8 @@ def iso_type_b_min_thickness(
     d_validity_limit = 6.0 * math.sqrt(od_mm * nominal_wall_mm)
     details = {
         "defect_size_used_mm": d,
+        "design_life_years": design_life_years,
+        "service_temp_limit_c": tm_type_b,
         "fleak": fleak,
         "ft2": ft2,
         "gamma_lcl_j_m2": gamma_lcl,
@@ -215,13 +224,16 @@ def calculate_repair(
     # take the maximum thickness.
     type_b_details = None
     if "Type B" in calc_method_thick and pressure_mpa > 0:
+        # Type B service life is capped (5 years for PRW110); the repair
+        # must be revalidated or replaced beyond that.
+        type_b_life = min(design_life, PROWRAP["type_b_max_life_years"])
         t_type_b, type_b_details = iso_type_b_min_thickness(
             pressure_mpa=pressure_mpa,
             od_mm=od,
             nominal_wall_mm=wall,
             defect_size_mm=length,
             design_temp_c=temp,
-            design_life_years=design_life,
+            design_life_years=type_b_life,
         )
         type_b_details["t_formula12_mm"] = t_type_b
         type_b_details["t_typea_mm"] = t_required
@@ -292,6 +304,23 @@ def calculate_repair(
             "thickness can satisfy Formula 12 - do not install this repair; "
             "reduce pressure, reduce the defect size, or use another method."
         )
+    if "Type B" in calc_method_thick and type_b_details is not None:
+        if design_life > type_b_details["design_life_years"]:
+            compliance_warnings.append(
+                "Type B service life is capped at "
+                f"{type_b_details['design_life_years']:.0f} years for PRW110 "
+                f"(requested: {design_life:.0f}). The repair must be "
+                "inspected and revalidated or replaced at the end of the "
+                "Type B service life."
+            )
+        if temp > type_b_details["service_temp_limit_c"]:
+            compliance_warnings.append(
+                f"Design temperature {temp:.1f} degC exceeds the Type B "
+                "upper service limit of "
+                f"{type_b_details['service_temp_limit_c']:.1f} degC "
+                "(Tg - 30 for Class 3 Type B repairs over 2 years). "
+                "This repair is outside the qualified temperature range."
+            )
     if "Type B" in calc_method_thick:
         compliance_warnings.append(
             "Type B design assumes a circular/near-circular defect of size "
