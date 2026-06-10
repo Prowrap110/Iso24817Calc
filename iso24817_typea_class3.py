@@ -1,0 +1,349 @@
+"""ISO 24817 Type A / Class 3 calculation helpers.
+
+This module ports the practical VBA route in ISO24817_TypeA_Class3_fixed.bas.
+It is intentionally isolated from the Streamlit app until the design basis and
+PRW110 long-term strain evidence are approved.
+"""
+
+from dataclasses import dataclass
+import math
+
+
+@dataclass(frozen=True)
+class TypeAClass3Inputs:
+    pressure_mpa: float = 1.0
+    substrate_allowable_pressure_mpa: float = 0.4
+    outside_diameter_mm: float = 406.4
+    remaining_wall_mm: float = 1.6
+    design_life_years: float = 10.0
+    design_temperature_c: float = 50.0
+    installation_temperature_c: float = 20.0
+    max_repair_temperature_c: float = 70.0
+    ambient_test_temperature_c: float = 20.0
+    qualification_test_temperature_c: float = 20.0
+    live_pressure_mpa: float = 0.0
+    hoop_modulus_mpa: float = 24000.0
+    axial_modulus_mpa: float = 12000.0
+    substrate_modulus_mpa: float = 207000.0
+    poisson_ratio: float = 0.3
+    hoop_cte_per_c: float = 25e-6
+    axial_cte_per_c: float = 12e-6
+    substrate_cte_per_c: float = 12e-6
+    lap_shear_mpa: float = 15.0
+    layer_thickness_mm: float = 0.8
+    use_performance_data: bool = False
+    long_term_strain_lcl: float | None = None
+    performance_data_source: str = "Design life"
+    equivalent_pressure_mpa: float | None = None
+    equivalent_axial_load_n: float | None = None
+    cyclic_derating_factor: float = 1.0
+    required_overlap_mm: float | None = None
+    available_landing_length_mm: float | None = None
+    component_type: str = "Straight"
+
+
+def component_factor(component_type: str) -> float:
+    normalized = (component_type or "Straight").strip().upper()
+    if normalized in {"", "STRAIGHT", "PIPE", "STRAIGHT PIPE"}:
+        return 1.0
+    if normalized == "BEND":
+        return 1.2
+    if normalized == "TEE":
+        return 2.0
+    if normalized in {"FLANGE", "REDUCER"}:
+        return 1.1
+    raise ValueError("Unknown component type. Use Straight, Bend, Tee, Flange, or Reducer.")
+
+
+def _positive(value: float, name: str):
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than zero.")
+
+
+def _validate(inputs: TypeAClass3Inputs):
+    _positive(inputs.pressure_mpa, "Design pressure")
+    _positive(inputs.outside_diameter_mm, "Outside diameter")
+    _positive(inputs.hoop_modulus_mpa, "Hoop modulus")
+    _positive(inputs.axial_modulus_mpa, "Axial modulus")
+    _positive(inputs.substrate_modulus_mpa, "Substrate modulus")
+    _positive(inputs.lap_shear_mpa, "Lap shear strength")
+    _positive(inputs.layer_thickness_mm, "Layer thickness")
+    _positive(inputs.design_life_years, "Design life")
+    if inputs.remaining_wall_mm < 0:
+        raise ValueError("Remaining wall thickness cannot be negative.")
+    if inputs.live_pressure_mpa < 0:
+        raise ValueError("Live pressure cannot be negative.")
+    if inputs.cyclic_derating_factor <= 0:
+        raise ValueError("Cyclic derating factor must be greater than zero.")
+    if inputs.use_performance_data and not inputs.long_term_strain_lcl:
+        raise ValueError(
+            "Long-term strain LCL, eps_lt, is required when performance data is used."
+        )
+
+
+def formula5_residual(
+    thickness_mm: float,
+    hoop_modulus_mpa: float,
+    substrate_modulus_mpa: float,
+    outside_diameter_mm: float,
+    equivalent_pressure_mpa: float,
+    equivalent_axial_load_n: float,
+    poisson_ratio: float,
+    live_pressure_mpa: float,
+    substrate_allowable_pressure_mpa: float,
+    remaining_wall_mm: float,
+    allowable_circ_strain: float,
+) -> float:
+    term1 = (1.0 / (hoop_modulus_mpa * thickness_mm)) * (
+        (equivalent_pressure_mpa * outside_diameter_mm / 2.0)
+        + (poisson_ratio * equivalent_axial_load_n / (math.pi * outside_diameter_mm))
+    )
+    term2 = (live_pressure_mpa * outside_diameter_mm) / (
+        2.0 * hoop_modulus_mpa * thickness_mm
+    )
+    term3 = (substrate_allowable_pressure_mpa * outside_diameter_mm) / (
+        (2.0 * hoop_modulus_mpa * thickness_mm)
+        + (substrate_modulus_mpa * remaining_wall_mm)
+    )
+    return term1 - term2 - term3 - allowable_circ_strain
+
+
+def solve_formula5_thickness(
+    hoop_modulus_mpa: float,
+    substrate_modulus_mpa: float,
+    outside_diameter_mm: float,
+    equivalent_pressure_mpa: float,
+    equivalent_axial_load_n: float,
+    poisson_ratio: float,
+    live_pressure_mpa: float,
+    substrate_allowable_pressure_mpa: float,
+    remaining_wall_mm: float,
+    allowable_circ_strain: float,
+) -> float:
+    lower = 0.000001
+    upper = max(outside_diameter_mm / 12.0, 50.0)
+
+    f_low = formula5_residual(
+        lower,
+        hoop_modulus_mpa,
+        substrate_modulus_mpa,
+        outside_diameter_mm,
+        equivalent_pressure_mpa,
+        equivalent_axial_load_n,
+        poisson_ratio,
+        live_pressure_mpa,
+        substrate_allowable_pressure_mpa,
+        remaining_wall_mm,
+        allowable_circ_strain,
+    )
+    f_high = formula5_residual(
+        upper,
+        hoop_modulus_mpa,
+        substrate_modulus_mpa,
+        outside_diameter_mm,
+        equivalent_pressure_mpa,
+        equivalent_axial_load_n,
+        poisson_ratio,
+        live_pressure_mpa,
+        substrate_allowable_pressure_mpa,
+        remaining_wall_mm,
+        allowable_circ_strain,
+    )
+
+    while f_low * f_high > 0 and upper < 10000.0:
+        upper *= 2.0
+        f_high = formula5_residual(
+            upper,
+            hoop_modulus_mpa,
+            substrate_modulus_mpa,
+            outside_diameter_mm,
+            equivalent_pressure_mpa,
+            equivalent_axial_load_n,
+            poisson_ratio,
+            live_pressure_mpa,
+            substrate_allowable_pressure_mpa,
+            remaining_wall_mm,
+            allowable_circ_strain,
+        )
+
+    if f_low * f_high > 0:
+        raise ValueError("Could not bracket a positive solution for Formula 5.")
+
+    mid = upper
+    for _ in range(200):
+        mid = (lower + upper) / 2.0
+        f_mid = formula5_residual(
+            mid,
+            hoop_modulus_mpa,
+            substrate_modulus_mpa,
+            outside_diameter_mm,
+            equivalent_pressure_mpa,
+            equivalent_axial_load_n,
+            poisson_ratio,
+            live_pressure_mpa,
+            substrate_allowable_pressure_mpa,
+            remaining_wall_mm,
+            allowable_circ_strain,
+        )
+        if abs(f_mid) < 1e-9:
+            break
+        if f_low * f_mid <= 0:
+            upper = mid
+            f_high = f_mid
+        else:
+            lower = mid
+            f_low = f_mid
+    return mid
+
+
+def calculate_type_a_class3(inputs: TypeAClass3Inputs) -> dict:
+    """Calculate a Type A / Class 3 minimum-thickness result."""
+    _validate(inputs)
+
+    peq = inputs.equivalent_pressure_mpa
+    if peq is None:
+        peq = inputs.pressure_mpa
+    feq = inputs.equivalent_axial_load_n
+    if feq is None:
+        feq = inputs.pressure_mpa * math.pi * inputs.outside_diameter_mm**2 / 4.0
+
+    fperf = 0.0
+    ft2 = 0.0
+    source = inputs.performance_data_source.strip().lower().replace("-", " ")
+
+    if inputs.use_performance_data:
+        if source in {"1000 h", "1000h", "1000 hour"}:
+            fperf = 0.612 * 10 ** (-0.0043 * inputs.design_life_years)
+        elif source in {"design life", "designlife"}:
+            fperf = 0.76 * 10 ** (-0.00273 * inputs.design_life_years)
+        else:
+            raise ValueError("Performance data source must be '1000 h' or 'Design life'.")
+
+        delta = (
+            inputs.max_repair_temperature_c
+            - inputs.design_temperature_c
+            - (inputs.qualification_test_temperature_c - inputs.ambient_test_temperature_c)
+        )
+        ft2 = 0.0000625 * delta**2 + 0.00125 * delta + 0.7
+        eps_c = fperf * ft2 * inputs.long_term_strain_lcl
+        circumferential_strain_basis = "performance_data"
+    else:
+        circumferential_strain_basis = "table_9_fallback"
+
+    if inputs.axial_modulus_mpa > 0.5 * inputs.hoop_modulus_mpa:
+        eps_c0 = 0.003061 * 10 ** (-0.0044 * inputs.design_life_years)
+        eps_a0 = eps_c0
+    else:
+        eps_c0 = 0.003061 * 10 ** (-0.0044 * inputs.design_life_years)
+        eps_a0 = 0.001
+
+    ft1_delta = inputs.max_repair_temperature_c - inputs.design_temperature_c
+    ft1 = 0.0000625 * ft1_delta**2 + 0.00125 * ft1_delta + 0.7
+
+    eps_c_noncyclic = (
+        ft1 * eps_c0
+        - (inputs.design_temperature_c - inputs.installation_temperature_c)
+        * (inputs.substrate_cte_per_c - inputs.hoop_cte_per_c)
+    )
+    eps_a_noncyclic = (
+        ft1 * eps_a0
+        - (inputs.design_temperature_c - inputs.installation_temperature_c)
+        * (inputs.substrate_cte_per_c - inputs.axial_cte_per_c)
+    )
+
+    eps_a = inputs.cyclic_derating_factor * eps_a_noncyclic
+    if inputs.use_performance_data:
+        # Formula 25: the cyclic factor applies to allowable strains on the
+        # performance route (Formula 11) as well.
+        eps_c = inputs.cyclic_derating_factor * eps_c
+    else:
+        eps_c = inputs.cyclic_derating_factor * eps_c_noncyclic
+
+    if eps_c <= 0:
+        raise ValueError("Calculated circumferential allowable strain is <= 0.")
+    if eps_a <= 0:
+        raise ValueError("Calculated axial allowable strain is <= 0.")
+
+    tmin_c = solve_formula5_thickness(
+        inputs.hoop_modulus_mpa,
+        inputs.substrate_modulus_mpa,
+        inputs.outside_diameter_mm,
+        peq,
+        feq,
+        inputs.poisson_ratio,
+        inputs.live_pressure_mpa,
+        inputs.substrate_allowable_pressure_mpa,
+        inputs.remaining_wall_mm,
+        eps_c,
+    )
+    tmin_a = (
+        (
+            feq / (math.pi * inputs.outside_diameter_mm * inputs.axial_modulus_mpa)
+            - (peq * inputs.outside_diameter_mm * inputs.poisson_ratio)
+            / (2.0 * inputs.hoop_modulus_mpa)
+        )
+        / eps_a
+    )
+    if tmin_a < 0:
+        tmin_a = 0.0
+
+    tdesign_base = max(tmin_c, tmin_a)
+    lmin_transfer = (
+        3.0 * inputs.axial_modulus_mpa * eps_a * tdesign_base
+    ) / inputs.lap_shear_mpa
+
+    if inputs.required_overlap_mm is None:
+        lover_required = max(25.0, lmin_transfer)
+        overlap_basis = "max_25mm_or_formula_21"
+    else:
+        lover_required = inputs.required_overlap_mm
+        overlap_basis = "user_required_overlap"
+
+    if (
+        inputs.available_landing_length_mm is not None
+        and inputs.available_landing_length_mm > 0
+        and inputs.available_landing_length_mm < lover_required
+    ):
+        fth_overlay = (lover_required / inputs.available_landing_length_mm) ** (2.0 / 3.0)
+        fth_overlay = min(fth_overlay, 2.5)
+    else:
+        fth_overlay = 1.0
+
+    fth_stress = component_factor(inputs.component_type)
+    tdesign_final = tdesign_base * fth_overlay * fth_stress
+    layer_count = math.ceil(tdesign_final / inputs.layer_thickness_mm)
+    d_limit = inputs.outside_diameter_mm / 12.0
+
+    return {
+        "design_path": "ISO 24817 Type A / Class 3 minimum-thickness route",
+        "circumferential_strain_basis": circumferential_strain_basis,
+        "peq_mpa": peq,
+        "feq_n": feq,
+        "fperf": fperf,
+        "ft2": ft2,
+        "ft1": ft1,
+        "eps_c0": eps_c0,
+        "eps_a0": eps_a0,
+        "eps_c_noncyclic": eps_c_noncyclic,
+        "eps_a_noncyclic": eps_a_noncyclic,
+        "eps_c": eps_c,
+        "eps_a": eps_a,
+        "tmin_c_mm": tmin_c,
+        "tmin_a_mm": tmin_a,
+        "tdesign_base_mm": tdesign_base,
+        "lmin_transfer_mm": lmin_transfer,
+        "lover_required_mm": lover_required,
+        "overlap_basis": overlap_basis,
+        "fth_overlay": fth_overlay,
+        "fth_stress": fth_stress,
+        "tdesign_final_mm": tdesign_final,
+        "layer_count": layer_count,
+        "d_over_12_limit_mm": d_limit,
+        "thickness_check_ok": tdesign_final < d_limit,
+        "overlap_transfer_check_ok": lover_required >= lmin_transfer,
+        "notes": [
+            "Axial extent Formulae 18/19 are not implemented in this route.",
+            "Performance route requires approved PRW110 eps_lt evidence.",
+            "Pressure-only Feq default is used when equivalent axial load is not supplied.",
+        ],
+    }

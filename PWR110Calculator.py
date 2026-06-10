@@ -1,6 +1,8 @@
 import streamlit as st
-import math
 from fpdf import FPDF
+
+from prowrap_calculations import calculate_repair, calculate_type_a_class3_fallback_check
+from prowrap_materials import PROWRAP
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(
@@ -8,35 +10,6 @@ st.set_page_config(
     page_icon="🔧",
     layout="wide"
 )
-
-# --- 2. PROWRAP CERTIFIED DATA ---
-# Source: ISO TS24817 and ASME PCC-2 PROWRAP HPTP repair system
-# qualification data, selected test methods listed in Test Data.pdf.
-PROWRAP = {
-    "ply_thickness": 0.83,             # mm, ISO 527-4
-    "modulus_circ": 45460,             # MPa, ISO 527-4
-    "strain_fail": 0.0233,             # mm/mm, circumferential, ISO 527-4
-    "tensile_strength": 574.1,         # MPa, circumferential, ISO 527-4
-    "modulus_axial": 43800,            # MPa, ISO 527-4
-    "strain_fail_axial": 0.0243,       # mm/mm, axial, ISO 527-4
-    "tensile_strength_axial": 563.67,  # MPa, axial, ISO 527-4
-    "poisson_circ": 0.066,             # ISO 527-4
-    "compressive_modulus": 3310,       # MPa, ISO 604
-    "compressive_strength": 85.58,     # MPa, ISO 604
-    "shear_modulus": 2450,             # MPa, ASTM D5379
-    "shore_d": 79.1,                   # Shore D, ISO 868
-    "glass_transition_temp": 78.18,    # °C, mid Tg, ISO 11357-2
-    "peak_exotherm_temp": 104,         # °C, ISO 11357-2
-    "thermal_expansion_circ": 10.34,   # ppm/K, circumferential, ASTM E831
-    "thermal_expansion_axial": 22.81,  # ppm/K, axial, ASTM E831
-    "lap_shear": 14.7,                 # MPa, ASTM D3165
-    "long_term_lap_shear": 9.62,       # MPa, ASTM D3165
-    "impact_peak_energy": 41.982,      # J, ASTM D7136
-    "short_term_survival": "PASS",     # ISO 24817
-    "max_temp": 58.18,                 # °C, Tg minus 20 °C design limit
-    "cloth_width_mm": 300,
-    "stitching_overlap_mm": 50
-}
 
 def safe_text(text):
     """Safely replaces Turkish/Special characters to prevent PDF encoding crashes."""
@@ -60,7 +33,7 @@ def create_pdf(report_data):
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(0, 10, txt="PROWRAP COMPOSITE REPAIR REPORT", ln=True, align='C')
     pdf.set_font("Arial", 'I', 10)
-    pdf.cell(0, 8, txt="Standard: ISO 24817 / ASME PCC-2", ln=True, align='C')
+    pdf.cell(0, 8, txt="Preliminary basis: selected ISO 24817 / ASME PCC-2 concepts", ln=True, align='C')
     pdf.ln(5)
 
     def add_section(title, data_dict):
@@ -101,10 +74,10 @@ def create_pdf(report_data):
         "Design Factor": f"{report_data['design_factor']}"
     })
     
-    # Add the ISO Note to the PDF directly under the Design section
+    # Add the basis note to the PDF directly under the design section.
     pdf.set_font("Arial", 'I', 9)
     pdf.set_text_color(100, 100, 100) # Dark grey for note
-    pdf.multi_cell(0, 5, txt=safe_text(f"* Note: This repair design was calculated in accordance with ISO 24817 (Table 9, p. 24) based on a specified design life of {report_data['design_life']} years."))
+    pdf.multi_cell(0, 5, txt=safe_text(f"* Preliminary estimate based on selected ISO 24817 / ASME PCC-2 concepts for a specified design life of {report_data['design_life']} years. Full ISO traceability requires route-specific verification and approved long-term design data."))
     pdf.set_text_color(0, 0, 0) # Reset to black
     pdf.ln(5)
 
@@ -134,7 +107,7 @@ def create_pdf(report_data):
         pdf.ln(2)
         pdf.set_font("Arial", 'B', 10)
         pdf.set_text_color(200, 0, 0)
-        pdf.multi_cell(0, 6, txt="NOTE: Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment inline with ISO 24817.")
+        pdf.multi_cell(0, 6, txt="NOTE: Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment in line with ISO 24817.")
         pdf.set_text_color(0, 0, 0)
 
     # Safe PDF output across different fpdf versions
@@ -143,101 +116,85 @@ def create_pdf(report_data):
         return output.encode('latin-1', 'replace')
     return bytes(output)
 
-def run_calculation(customer, location, report_no, od, wall, pressure, temp, defect_type, defect_loc, length, rem_wall, yield_strength, design_factor, design_life):
-    errors = []
-    if temp > PROWRAP["max_temp"]:
-        errors.append(f"❌ **CRITICAL:** Operating temperature ({temp}°C) exceeds Prowrap limit of {PROWRAP['max_temp']}°C.")
-    if rem_wall > wall:
-        errors.append("❌ **INPUT ERROR:** Remaining wall thickness cannot be greater than nominal wall thickness.")
-    if errors:
-        for err in errors: st.error(err)
+def run_calculation(
+    customer,
+    location,
+    report_no,
+    od,
+    wall,
+    pressure,
+    temp,
+    defect_type,
+    defect_loc,
+    length,
+    rem_wall,
+    yield_strength,
+    design_factor,
+    design_life,
+    show_typea_class3_check=False,
+    substrate_allowable_pressure=0.0,
+    installation_temp=20.0,
+    component_type="Straight",
+    cyclic_derating_factor=1.0,
+):
+    try:
+        report_data = calculate_repair(
+            customer,
+            location,
+            report_no,
+            od,
+            wall,
+            pressure,
+            temp,
+            defect_type,
+            defect_loc,
+            length,
+            rem_wall,
+            yield_strength,
+            design_factor,
+            design_life,
+            force_3_layers=st.session_state.force_3_layers,
+        )
+    except ValueError as exc:
+        for err in str(exc).splitlines():
+            st.error(f"❌ **INPUT ERROR:** {err}")
         return
 
-    wall_loss_ratio = (wall - rem_wall) / wall
-    is_severe_loss = wall_loss_ratio > 0.65
-    
-    calc_method_thick = "Type B (Total Replacement)"
-    calc_method_overlap = "Type B (Shear Controlled)"
-    
-    if defect_type == "Corrosion":
-        if defect_loc == "External" and not is_severe_loss:
-             calc_method_thick = "Type A (Load Sharing)"
-             calc_method_overlap = "Type A (Geometry Controlled)"
+    wall_loss_ratio = report_data["wall_loss_ratio"]
+    num_plies = report_data["num_plies"]
+    final_thickness = report_data["final_thickness"]
+    total_repair_length_calc = report_data["iso_length"]
+    procurement_axial_length = report_data["proc_length"]
+    optimized_sqm = report_data["optimized_sqm"]
+    epoxy_kg = report_data["epoxy_kg"]
+    is_upgraded = report_data["is_upgraded"]
+    p_steel_capacity = report_data["p_steel_capacity"]
+    p_composite_design = report_data["p_composite_design"]
+    design_strain = report_data["design_strain"]
+    num_bands = report_data["num_bands"]
+    typea_class3_result = None
+    typea_class3_note = None
+
+    if show_typea_class3_check:
+        if defect_type == "Corrosion" and defect_loc == "External":
+            try:
+                typea_class3_result = calculate_type_a_class3_fallback_check(
+                    od=od,
+                    pressure_bar=pressure,
+                    temp=temp,
+                    rem_wall=rem_wall,
+                    design_life=design_life,
+                    substrate_allowable_pressure_bar=substrate_allowable_pressure,
+                    installation_temp=installation_temp,
+                    component_type=component_type,
+                    cyclic_derating_factor=cyclic_derating_factor,
+                )
+            except ValueError as exc:
+                typea_class3_note = str(exc)
         else:
-             calc_method_thick = "Type B (Total Replacement)"
-             calc_method_overlap = "Type B (Shear Controlled)"
-    elif defect_type == "Dent":
-        calc_method_thick = "Type A (Dent Reinforcement)"
-        calc_method_overlap = "Type B (Shear Controlled)"
-    elif defect_type in ["Leak", "Crack"]:
-        calc_method_thick = "Type B (Total Replacement)"
-        calc_method_overlap = "Type B (Shear Controlled)"
-
-    safety_factor = 1.0 / design_factor
-    temp_factor = 0.95 if temp > 40 else 1.0
-    design_strain = (PROWRAP["strain_fail"] * temp_factor) / safety_factor
-
-    pressure_mpa = pressure * 0.1
-    allowable_steel_stress = yield_strength * design_factor
-    theoretical_capacity = (2 * allowable_steel_stress * rem_wall) / od
-    
-    if defect_type in ["Leak", "Crack"] or defect_loc == "Internal" or is_severe_loss:
-        p_steel_capacity = 0.0
-    else:
-        p_steel_capacity = theoretical_capacity
-
-    if "Type A" in calc_method_thick and p_steel_capacity > 0:
-        p_composite_design = max(0, pressure_mpa - p_steel_capacity)
-    else:
-        p_composite_design = pressure_mpa
-
-    if p_composite_design > 0:
-        t_required = (p_composite_design * od) / (2 * PROWRAP["modulus_circ"] * design_strain)
-    else:
-        t_required = 0.0
-
-    num_plies = math.ceil(t_required / PROWRAP["ply_thickness"])
-    min_plies = 4 if defect_type == "Leak" else 2
-    num_plies = max(num_plies, min_plies)
-    
-    is_upgraded = False
-    if st.session_state.force_3_layers and num_plies < 3:
-        num_plies = 3
-        is_upgraded = True
-
-    final_thickness = num_plies * PROWRAP["ply_thickness"]
-
-    if "Type A" in calc_method_overlap:
-        overlap_length = max(50.0, 3.0 * final_thickness)
-    else:
-        hoop_load = final_thickness * PROWRAP["modulus_circ"] * design_strain
-        allowable_shear = PROWRAP["lap_shear"] / safety_factor
-        overlap_length = max(hoop_load / allowable_shear, 50.0)
-
-    total_repair_length_calc = length + (2 * overlap_length)
-
-    if total_repair_length_calc <= PROWRAP["cloth_width_mm"]:
-        num_bands = 1
-        procurement_axial_length = 300
-    else:
-        num_bands = math.ceil((total_repair_length_calc - 300) / 250) + 1
-        procurement_axial_length = num_bands * 300
-    
-    circumference_m = (math.pi * od) / 1000
-    axial_procurement_m = procurement_axial_length / 1000
-    optimized_sqm = axial_procurement_m * circumference_m * num_plies
-    epoxy_kg = optimized_sqm * 1.2 
-
-    report_data = {
-        "customer": customer, "location": location, "report_no": report_no,
-        "od": od, "wall": wall, "yield_str": yield_strength, "pressure": pressure, "temp": temp,
-        "defect_type": defect_type, "defect_loc": defect_loc, "rem_wall": rem_wall, "length": length,
-        "wall_loss_ratio": wall_loss_ratio, "calc_method_thick": calc_method_thick,
-        "num_plies": num_plies, "final_thickness": final_thickness, "iso_length": total_repair_length_calc,
-        "num_bands": num_bands, "proc_length": procurement_axial_length, "sf": safety_factor,
-        "design_factor": design_factor, "design_life": design_life, 
-        "optimized_sqm": optimized_sqm, "epoxy_kg": epoxy_kg
-    }
+            typea_class3_note = (
+                "Type A / Class 3 check is limited to external corrosion cases in this version."
+            )
 
     st.success(f"✅ Calculation Complete")
 
@@ -252,7 +209,7 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
     if num_plies == 2 and not is_upgraded:
         col_warn, col_btn = st.columns([3, 1])
         with col_warn:
-            st.warning("⚠️ **PROTAP Recommendation:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment inline with ISO 24817.")
+            st.warning("⚠️ **PROTAP Recommendation:** Protap recommends min. 3 layer repair if the repair is subject to harsh and corrosive environment in line with ISO 24817.")
         with col_btn:
             if st.button("⬆️ Do you want 3 layers?", use_container_width=True):
                 st.session_state.force_3_layers = True
@@ -275,6 +232,27 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
             st.write(f"**Composite Design Pressure:** {p_composite_design:.2f} MPa")
             st.write(f"**Design Strain Limit:** {design_strain*100:.3f}%")
             st.write(f"**Design Factor (f):** {design_factor}")
+
+        if show_typea_class3_check:
+            st.markdown("### ISO Type A / Class 3 Check")
+            if typea_class3_result:
+                if typea_class3_result["circumferential_strain_basis"] == "performance_data":
+                    st.write(
+                        "**Basis:** PRW110 performance data "
+                        "(ISO 24817 Formula 11, eps_lt = "
+                        f"{PROWRAP['long_term_strain_lcl']*100:.2f}%)."
+                    )
+                else:
+                    st.write("**Basis:** Table 9 fallback; PRW110 performance eps_lt not supplied.")
+                st.write(f"**Final Thickness:** {typea_class3_result['tdesign_final_mm']:.2f} mm")
+                st.write(f"**Layer Count:** {typea_class3_result['layer_count']}")
+                st.write(f"**Required Overlap:** {typea_class3_result['lover_required_mm']:.1f} mm")
+                st.write(f"**Component Factor:** {typea_class3_result['fth_stress']:.2f}")
+                st.write(
+                    f"**Thickness Check:** {'OK' if typea_class3_result['thickness_check_ok'] else 'NOT OK'}"
+                )
+            elif typea_class3_note:
+                st.warning(typea_class3_note)
 
     with tab2:
         st.markdown("## 🛠️ Prowrap Repair Method Statement")
@@ -307,8 +285,8 @@ def run_calculation(customer, location, report_no, od, wall, pressure, temp, def
             - **Procurement Len:** {procurement_axial_length} mm
             - **Epoxy Total:** {epoxy_kg:.1f} kg
             """)
-            # Add the ISO Note to the UI dynamically
-            st.caption(f"*Note: This repair design was calculated in accordance with ISO 24817 (Table 9, p. 24) based on a specified design life of {design_life} years.*")
+            # Add the calculation-basis note to the UI dynamically.
+            st.caption(f"*Preliminary estimate based on selected ISO 24817 / ASME PCC-2 concepts for a specified design life of {design_life} years. Full ISO traceability requires route-specific verification and approved long-term design data.*")
 
         st.markdown("---")
         st.markdown("### 📋 Installation Checklist")
@@ -347,7 +325,7 @@ def main():
 
     try:
         st.title("🔧 Prowrap Repair Master Calculator")
-        st.markdown(f"**Standard:** ISO 24817 / ASME PCC-2 | **T-Limit:** {PROWRAP['max_temp']}°C")
+        st.markdown(f"**Basis:** Preliminary ISO 24817 / ASME PCC-2 screening estimate | **T-Limit:** {PROWRAP['max_temp']}°C")
         
         st.sidebar.header("1. Project Info")
         customer = st.sidebar.text_input("Customer", value="PROTAP", on_change=reset_calc)
@@ -372,13 +350,40 @@ def main():
         st.sidebar.header("5. Safety & Design Settings")
         design_life = st.sidebar.number_input("Design Life [years]", value=20, min_value=1, on_change=reset_calc)
         df = st.sidebar.number_input("Design Factor (f)", value=0.72, min_value=0.1, max_value=1.0, on_change=reset_calc)
+
+        st.sidebar.header("6. ISO Type A / Class 3 Check")
+        show_typea_class3_check = st.sidebar.checkbox("Show Type A / Class 3 check", value=False, on_change=reset_calc)
+        substrate_allowable_pressure = st.sidebar.number_input("Allowable substrate pressure [bar]", value=0.0, min_value=0.0, on_change=reset_calc)
+        installation_temp = st.sidebar.number_input("Installation temperature [°C]", value=20.0, on_change=reset_calc)
+        component_type = st.sidebar.selectbox("Component type", ["Straight", "Bend", "Tee", "Flange", "Reducer"], on_change=reset_calc)
+        cyclic_derating_factor = st.sidebar.number_input("Cyclic derating factor", value=1.0, min_value=0.01, max_value=1.0, on_change=reset_calc)
         
         if st.sidebar.button("Calculate & Optimize", type="primary"):
             st.session_state.calc_active = True
             st.session_state.force_3_layers = False
             
         if st.session_state.calc_active:
-            run_calculation(customer, location, report_no, od, wall, pres, temp, type_, loc_, len_, rem_, yield_str, df, design_life)
+            run_calculation(
+                customer,
+                location,
+                report_no,
+                od,
+                wall,
+                pres,
+                temp,
+                type_,
+                loc_,
+                len_,
+                rem_,
+                yield_str,
+                df,
+                design_life,
+                show_typea_class3_check,
+                substrate_allowable_pressure,
+                installation_temp,
+                component_type,
+                cyclic_derating_factor,
+            )
             
     except Exception as e:
         st.error(f"⚠️ Application Error: {e}")

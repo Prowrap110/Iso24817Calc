@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.venv/
+iso24817calc-venv/
