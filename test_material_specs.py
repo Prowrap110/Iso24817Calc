@@ -63,11 +63,8 @@ class ProwrapMaterialSpecsTest(unittest.TestCase):
             "thermal_expansion_axial",
             "lap_shear",
             "long_term_lap_shear",
-<<<<<<< HEAD
             "long_term_strain_lcl",
-=======
             "long_term_strain_20y",
->>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
             "impact_peak_energy",
             "short_term_survival",
             "max_temp",

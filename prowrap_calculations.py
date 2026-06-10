@@ -79,21 +79,13 @@ def calculate_repair(
     )
 
     wall_loss_ratio = (wall - rem_wall) / wall
-<<<<<<< HEAD
-    is_severe_loss = wall_loss_ratio > 0.65
-=======
     has_no_substrate_capacity = rem_wall < 1.0
->>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
 
     calc_method_thick = "Type B (Total Replacement)"
     calc_method_overlap = "Type B (Shear Controlled)"
 
     if defect_type == "Corrosion":
-<<<<<<< HEAD
-        if defect_loc == "External" and not is_severe_loss:
-=======
         if defect_loc == "External" and not has_no_substrate_capacity:
->>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
             calc_method_thick = "Type A (Load Sharing)"
             calc_method_overlap = "Type A (Geometry Controlled)"
         else:
@@ -114,15 +106,11 @@ def calculate_repair(
     allowable_steel_stress = yield_strength * design_factor
     theoretical_capacity = (2 * allowable_steel_stress * rem_wall) / od
 
-<<<<<<< HEAD
-    if defect_type in ["Leak", "Crack"] or defect_loc == "Internal" or is_severe_loss:
-=======
     if (
         defect_type in ["Leak", "Crack"]
         or defect_loc == "Internal"
         or has_no_substrate_capacity
     ):
->>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
         p_steel_capacity = 0.0
     else:
         p_steel_capacity = theoretical_capacity
@@ -189,12 +177,8 @@ def calculate_repair(
         "rem_wall": rem_wall,
         "length": length,
         "wall_loss_ratio": wall_loss_ratio,
-<<<<<<< HEAD
-        "is_severe_loss": is_severe_loss,
-=======
         "has_no_substrate_capacity": has_no_substrate_capacity,
         "is_severe_loss": has_no_substrate_capacity,
->>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
         "calc_method_thick": calc_method_thick,
         "calc_method_overlap": calc_method_overlap,
         "safety_factor": safety_factor,
@@ -221,11 +205,7 @@ def calculate_repair(
     }
 
 
-<<<<<<< HEAD
-def calculate_type_a_class3_fallback_check(
-=======
 def calculate_type_a_class3_prowrap_check(
->>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
     od,
     pressure_bar,
     temp,
@@ -236,17 +216,13 @@ def calculate_type_a_class3_prowrap_check(
     component_type="Straight",
     cyclic_derating_factor=1.0,
 ):
-<<<<<<< HEAD
-    """Run the isolated ISO Type A/Class 3 route using PRW110 data.
+    """Run the isolated ISO Type A/Class 3 route using PRW110 performance data.
 
     Uses the ISO 24817 7.5.6 performance route (Formula 11,
     eps_c = fperf * fT2 * eps_lt) when PRW110 long-term strain LCL data is
     present in the material dataset; otherwise falls back to Table 9 strains.
     """
-    eps_lt = PROWRAP.get("long_term_strain_lcl")
-=======
-    """Run the isolated ISO Type A/Class 3 route using PRW110 performance data."""
->>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
+    eps_lt = PROWRAP.get("long_term_strain_lcl", PROWRAP.get("long_term_strain_20y"))
     inputs = TypeAClass3Inputs(
         pressure_mpa=pressure_bar * 0.1,
         substrate_allowable_pressure_mpa=substrate_allowable_pressure_bar * 0.1,
@@ -265,13 +241,8 @@ def calculate_type_a_class3_prowrap_check(
         axial_cte_per_c=PROWRAP["thermal_expansion_axial"] * 1e-6,
         lap_shear_mpa=PROWRAP["long_term_lap_shear"],
         layer_thickness_mm=PROWRAP["ply_thickness"],
-<<<<<<< HEAD
         use_performance_data=eps_lt is not None,
         long_term_strain_lcl=eps_lt,
-=======
-        use_performance_data=True,
-        long_term_strain_lcl=PROWRAP["long_term_strain_20y"],
->>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
         performance_data_source="Design life",
         cyclic_derating_factor=cyclic_derating_factor,
         component_type=component_type,
@@ -283,17 +254,12 @@ def calculate_type_a_class3_prowrap_check(
         "hoop_modulus_mpa": PROWRAP["modulus_circ"],
         "axial_modulus_mpa": PROWRAP["modulus_axial"],
         "lap_shear_mpa": PROWRAP["long_term_lap_shear"],
-<<<<<<< HEAD
+        "long_term_strain_lcl": eps_lt,
         "performance_data": (
             f"Formula 11 performance route, eps_lt={eps_lt} (design-life data)"
             if eps_lt is not None
             else "not used - Table 9 fallback"
         ),
-    }
-    return result
-=======
-        "long_term_strain_20y": PROWRAP["long_term_strain_20y"],
-        "performance_data": "PRW110 20-year long-term strain",
     }
     return result
 
@@ -361,4 +327,3 @@ def apply_type_a_class3_result_to_repair(repair_data, typea_class3_result):
         }
     )
     return updated
->>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890

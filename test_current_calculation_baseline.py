@@ -58,8 +58,6 @@ class CurrentCalculationBaselineTest(unittest.TestCase):
         self.assertAlmostEqual(result["p_steel_capacity"], 0.0)
         self.assertGreaterEqual(result["num_plies"], 4)
 
-<<<<<<< HEAD
-=======
     def test_external_corrosion_keeps_pipe_capacity_down_to_one_mm_remaining_wall(self):
         result = calculate_repair(**default_inputs(rem_wall=2.0))
 
@@ -73,7 +71,6 @@ class CurrentCalculationBaselineTest(unittest.TestCase):
         self.assertEqual(result["calc_method_thick"], "Type B (Total Replacement)")
         self.assertAlmostEqual(result["p_steel_capacity"], 0.0)
 
->>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
 
 if __name__ == "__main__":
     unittest.main()
