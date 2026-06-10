@@ -99,8 +99,16 @@ def calculate_repair(
         calc_method_overlap = "Type B (Shear Controlled)"
 
     safety_factor = 1.0 / design_factor
-    temp_factor = 0.95 if temp > 40 else 1.0
-    design_strain = (PROWRAP["strain_fail"] * temp_factor) / safety_factor
+
+    # ISO 24817 allowable strain, 7.5.6 performance route (Formula 11):
+    # eps_c = fperf * fT2 * eps_lt, with Class 3 design-life-data fperf
+    # (Table 10) and the Table 8 polynomial for fT2 (Ttest == Tamb in the
+    # PRW110 qualification, so the argument reduces to Tm - Td).
+    eps_lt = PROWRAP.get("long_term_strain_lcl", PROWRAP.get("long_term_strain_20y"))
+    fperf = 0.76 * 10 ** (-0.00273 * design_life)
+    ft2_delta = PROWRAP["max_temp"] - temp
+    temp_factor = 0.0000625 * ft2_delta**2 + 0.00125 * ft2_delta + 0.7
+    design_strain = fperf * temp_factor * eps_lt
 
     pressure_mpa = pressure * 0.1
     allowable_steel_stress = yield_strength * design_factor
@@ -128,7 +136,10 @@ def calculate_repair(
         t_required = 0.0
 
     num_plies = math.ceil(t_required / PROWRAP["ply_thickness"])
-    min_plies = 4 if defect_type == "Leak" else 2
+    # ISO 24817 7.5.14: minimum laminate thickness is the greater of
+    # 2 layers or 2 mm (3 plies at 0.83 mm/ply).
+    min_plies_iso = math.ceil(2.0 / PROWRAP["ply_thickness"])
+    min_plies = max(4 if defect_type == "Leak" else 2, min_plies_iso)
     num_plies = max(num_plies, min_plies)
 
     is_upgraded = False
@@ -138,18 +149,24 @@ def calculate_repair(
 
     final_thickness = num_plies * PROWRAP["ply_thickness"]
 
+    # ISO 24817 7.5.8 axial extent:
+    # Formula (18) geometric overlap 2*sqrt(D*t), never less than 50 mm,
+    # plus the Formula (21) load-transfer check 3*Ea*eps_a*t/tau.
+    overlap_geometric = 2.0 * math.sqrt(od * wall)
+    overlap_transfer = (
+        3.0 * PROWRAP["modulus_axial"] * design_strain * final_thickness
+    ) / PROWRAP["long_term_lap_shear"]
     if "Type A" in calc_method_overlap:
-        overlap_shear_basis = "geometry_minimum"
-        overlap_shear_strength = None
-        overlap_length = max(50.0, 3.0 * final_thickness)
-    else:
-        hoop_load = final_thickness * PROWRAP["modulus_circ"] * design_strain
-        overlap_shear_basis = "long_term_lap_shear"
+        overlap_shear_basis = "iso_formula_18_and_21"
         overlap_shear_strength = PROWRAP["long_term_lap_shear"]
-        allowable_shear = overlap_shear_strength / safety_factor
-        overlap_length = max(hoop_load / allowable_shear, 50.0)
+    else:
+        overlap_shear_basis = "iso_formula_18_and_21_type_b"
+        overlap_shear_strength = PROWRAP["long_term_lap_shear"]
+    overlap_length = max(50.0, overlap_geometric, overlap_transfer)
 
-    total_repair_length_calc = length + (2 * overlap_length)
+    # Formula (20): total length = defect + 2*overlap + 2*taper (taper >= 5:1).
+    taper_length = 5.0 * final_thickness
+    total_repair_length_calc = length + (2 * overlap_length) + (2 * taper_length)
 
     if total_repair_length_calc <= PROWRAP["cloth_width_mm"]:
         num_bands = 1
@@ -162,6 +179,28 @@ def calculate_repair(
     axial_procurement_m = procurement_axial_length / 1000
     optimized_sqm = axial_procurement_m * circumference_m * num_plies
     epoxy_kg = optimized_sqm * 1.2
+
+    compliance_warnings = []
+    if "Type B" in calc_method_thick:
+        compliance_warnings.append(
+            "Type B (through-wall / leak) designs require the ISO 24817 "
+            "Formula 12 energy-release-rate method with qualified gamma_LCL "
+            "data (Annex D), which is not available for PRW110. This result "
+            "is NOT an ISO 24817 Type B design and must not be used for "
+            "leaking or through-wall defects without that qualification."
+        )
+    if p_steel_capacity > 0:
+        compliance_warnings.append(
+            "Substrate pressure capacity is estimated by Barlow on the "
+            "remaining wall. ISO 24817 requires the substrate MAWP (p_s) "
+            "from a defect assessment (ASME B31G / API 579 / BS 7910)."
+        )
+    thickness_check_ok = final_thickness < od / 12.0
+    if not thickness_check_ok:
+        compliance_warnings.append(
+            "Repair thickness exceeds D/12: the thin-wall design formulae "
+            "of ISO 24817 are not valid for this repair."
+        )
 
     return {
         "customer": customer,
@@ -192,8 +231,15 @@ def calculate_repair(
         "final_thickness": final_thickness,
         "iso_length": total_repair_length_calc,
         "overlap_length": overlap_length,
+        "overlap_geometric": overlap_geometric,
+        "overlap_transfer": overlap_transfer,
+        "taper_length": taper_length,
         "overlap_shear_basis": overlap_shear_basis,
         "overlap_shear_strength": overlap_shear_strength,
+        "eps_lt": eps_lt,
+        "fperf": fperf,
+        "thickness_check_ok": thickness_check_ok,
+        "compliance_warnings": compliance_warnings,
         "num_bands": num_bands,
         "proc_length": procurement_axial_length,
         "sf": safety_factor,
@@ -215,6 +261,7 @@ def calculate_type_a_class3_prowrap_check(
     installation_temp=20.0,
     component_type="Straight",
     cyclic_derating_factor=1.0,
+    nominal_wall_mm=None,
 ):
     """Run the isolated ISO Type A/Class 3 route using PRW110 performance data.
 
@@ -246,6 +293,7 @@ def calculate_type_a_class3_prowrap_check(
         performance_data_source="Design life",
         cyclic_derating_factor=cyclic_derating_factor,
         component_type=component_type,
+        nominal_wall_mm=nominal_wall_mm,
     )
     result = calculate_type_a_class3(inputs)
     result["input_summary"] = {
@@ -292,7 +340,9 @@ def apply_type_a_class3_result_to_repair(repair_data, typea_class3_result):
     layer_count = typea_class3_result["layer_count"]
     final_installed_thickness = layer_count * PROWRAP["ply_thickness"]
     overlap_length = typea_class3_result["lover_required_mm"]
-    repair_length = updated["length"] + (2.0 * overlap_length)
+    taper_length = typea_class3_result.get("taper_length_mm", 0.0)
+    # Formula (20): total length = defect + 2*overlap + 2*taper.
+    repair_length = updated["length"] + (2.0 * overlap_length) + (2.0 * taper_length)
 
     if repair_length <= PROWRAP["cloth_width_mm"]:
         num_bands = 1
@@ -317,7 +367,8 @@ def apply_type_a_class3_result_to_repair(repair_data, typea_class3_result):
             "final_thickness": final_installed_thickness,
             "iso_length": repair_length,
             "overlap_length": overlap_length,
-            "overlap_shear_basis": "iso_formula_21",
+            "taper_length": taper_length,
+            "overlap_shear_basis": "iso_formula_18_and_21",
             "overlap_shear_strength": PROWRAP["long_term_lap_shear"],
             "num_bands": num_bands,
             "proc_length": procurement_axial_length,

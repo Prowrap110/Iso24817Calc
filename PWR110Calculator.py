@@ -82,9 +82,15 @@ def create_pdf(report_data):
     # Add the basis note to the PDF directly under the design section.
     pdf.set_font("Arial", 'I', 9)
     pdf.set_text_color(100, 100, 100) # Dark grey for note
-    pdf.multi_cell(0, 5, txt=safe_text(f"* Preliminary estimate based on selected ISO 24817 / ASME PCC-2 concepts for a specified design life of {report_data['design_life']} years. Full ISO traceability requires route-specific verification and approved long-term design data."))
+    pdf.multi_cell(0, 5, txt=safe_text(f"* Thickness per ISO 24817 Formula 11 performance route (eps_lt = 0.55%, Class 3, {report_data['design_life']} yr design life); axial extent per Formulae 18/20/21; minimum thickness per 7.5.14. Substrate capacity is a Barlow estimate - ISO 24817 requires MAWP from a defect assessment (ASME B31G / API 579). Verify against a licensed copy of the standard before use."))
     pdf.set_text_color(0, 0, 0) # Reset to black
-    pdf.ln(5)
+    pdf.ln(2)
+    for warning_text in report_data.get("compliance_warnings", []):
+        pdf.set_font("Arial", 'B', 9)
+        pdf.set_text_color(200, 0, 0)
+        pdf.multi_cell(0, 5, txt=safe_text(f"WARNING: {warning_text}"))
+        pdf.set_text_color(0, 0, 0)
+    pdf.ln(3)
 
     add_section("4. Material Procurement", {
         "Fabric Needed (300mm Roll)": f"{report_data['optimized_sqm']:.2f} sqm",
@@ -189,6 +195,7 @@ def run_calculation(
                     temp=temp,
                     rem_wall=rem_wall,
                     design_life=design_life,
+                    nominal_wall_mm=wall,
                     substrate_allowable_pressure_bar=substrate_allowable_pressure,
                     installation_temp=installation_temp,
                     component_type=component_type,
@@ -213,6 +220,9 @@ def run_calculation(
         num_bands = report_data["num_bands"]
 
     st.success(f"✅ Calculation Complete")
+
+    for warning_text in report_data.get("compliance_warnings", []):
+        st.error(f"⚠️ **ISO 24817 COMPLIANCE:** {warning_text}")
 
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Required Plies", f"{num_plies}", f"{final_thickness:.2f} mm")
@@ -246,7 +256,7 @@ def run_calculation(
         with c2:
             st.markdown("### Structural Design")
             st.write(f"**Composite Design Pressure:** {p_composite_design:.2f} MPa")
-            st.write(f"**Design Strain Limit:** {design_strain*100:.3f}%")
+            st.write(f"**Design Strain Limit:** {design_strain*100:.3f}% (ISO 24817 Formula 11: fperf x fT2 x eps_lt)")
             st.write(f"**Design Factor (f):** {design_factor}")
 
         if show_typea_class3_check:

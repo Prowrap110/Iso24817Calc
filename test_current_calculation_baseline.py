@@ -35,20 +35,25 @@ class CurrentCalculationBaselineTest(unittest.TestCase):
         self.assertAlmostEqual(result["p_steel_capacity"], 5.088188976377953)
         self.assertAlmostEqual(result["p_composite_design"], 0.0)
         self.assertAlmostEqual(result["t_required"], 0.0)
-        self.assertEqual(result["num_plies"], 2)
-        self.assertAlmostEqual(result["final_thickness"], 1.66)
-        self.assertAlmostEqual(result["overlap_length"], 50.0)
-        self.assertAlmostEqual(result["iso_length"], 200.0)
-        self.assertEqual(result["num_bands"], 1)
-        self.assertEqual(result["proc_length"], 300)
-        self.assertAlmostEqual(result["optimized_sqm"], 0.8618016967327521)
-        self.assertAlmostEqual(result["epoxy_kg"], 1.0341620360793025)
+        # ISO 7.5.14 minimum thickness: greater of 2 layers or 2 mm -> 3 plies.
+        self.assertEqual(result["num_plies"], 3)
+        self.assertAlmostEqual(result["final_thickness"], 2.49)
+        # Formula (18): overlap = 2*sqrt(D*t) = 132 mm, never < 50 mm.
+        self.assertAlmostEqual(result["overlap_length"], 132.0169080080275)
+        self.assertAlmostEqual(result["taper_length"], 12.45)
+        # Formula (20): defect + 2*overlap + 2*taper.
+        self.assertAlmostEqual(result["iso_length"], 388.933816016055)
+        self.assertEqual(result["num_bands"], 2)
+        self.assertEqual(result["proc_length"], 600)
+        self.assertAlmostEqual(result["optimized_sqm"], 2.585405090198256)
+        self.assertAlmostEqual(result["epoxy_kg"], 3.1024861082379074)
 
-    def test_force_3_layers_preserves_current_upgrade_behavior(self):
+    def test_force_3_layers_is_noop_now_that_iso_minimum_is_three(self):
         result = calculate_repair(**default_inputs(), force_3_layers=True)
 
         self.assertEqual(result["num_plies"], 3)
-        self.assertTrue(result["is_upgraded"])
+        # ISO minimum already yields 3 plies, so no "upgrade" occurs.
+        self.assertFalse(result["is_upgraded"])
         self.assertAlmostEqual(result["final_thickness"], 2.49)
 
     def test_type_b_leak_uses_zero_steel_capacity(self):

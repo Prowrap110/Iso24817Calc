@@ -17,13 +17,15 @@ class Iso24817TypeAClass3Test(unittest.TestCase):
         self.assertAlmostEqual(result["ft1"], 0.75)
         self.assertAlmostEqual(result["eps_c0"], 0.0027660710390639645)
         self.assertAlmostEqual(result["eps_a0"], 0.001)
-        self.assertAlmostEqual(result["eps_c"], 0.0024645532792979736)
+        # eps_c includes the conservative |Formula 10| thermal-mismatch term.
+        self.assertAlmostEqual(result["eps_c"], 0.0016845532792979733)
         self.assertAlmostEqual(result["eps_a"], 0.00075)
-        self.assertAlmostEqual(result["tmin_c_mm"], 3.489176369097411, places=6)
+        self.assertAlmostEqual(result["tmin_c_mm"], 3.769544691584527, places=6)
         self.assertAlmostEqual(result["tmin_a_mm"], 7.902222222222221)
         self.assertAlmostEqual(result["tdesign_base_mm"], 7.902222222222221)
         self.assertAlmostEqual(result["lmin_transfer_mm"], 14.223999999999997)
-        self.assertAlmostEqual(result["lover_required_mm"], 25.0)
+        # 7.5.8: overlap never less than 50 mm.
+        self.assertAlmostEqual(result["lover_required_mm"], 50.0)
         self.assertAlmostEqual(result["tdesign_final_mm"], 7.902222222222221)
         self.assertEqual(result["layer_count"], 10)
         self.assertTrue(result["thickness_check_ok"])
@@ -42,7 +44,8 @@ class Iso24817TypeAClass3Test(unittest.TestCase):
         self.assertAlmostEqual(result["fperf"], 0.7136965416070369)
         self.assertAlmostEqual(result["ft2"], 0.75)
         self.assertAlmostEqual(result["eps_c"], 0.0018734534217184717)
-        self.assertAlmostEqual(result["tmin_c_mm"], 4.485041813390611, places=6)
+        # Corrected Formula (5): ps and plive terms in their ISO positions.
+        self.assertAlmostEqual(result["tmin_c_mm"], 3.3894607806147325, places=6)
         self.assertGreater(result["tmin_c_mm"], 0)
 
     def test_component_factors_match_vba_reference(self):

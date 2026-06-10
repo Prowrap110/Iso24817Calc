@@ -40,6 +40,8 @@ class TypeAClass3Inputs:
     required_overlap_mm: float | None = None
     available_landing_length_mm: float | None = None
     component_type: str = "Straight"
+    nominal_wall_mm: float | None = None
+    tee_branch_diameter_mm: float | None = None
 
 
 def component_factor(component_type: str) -> float:
@@ -94,16 +96,22 @@ def formula5_residual(
     remaining_wall_mm: float,
     allowable_circ_strain: float,
 ) -> float:
+    # ISO 24817:2017 Formula (5):
+    # eps_c = [peq*D/2 + nu*Feq/(pi*D)]/(Ec*t) - ps*D/(2*Ec*t)
+    #         - plive*D/(2*(Ec*t + Es*ts))
     term1 = (1.0 / (hoop_modulus_mpa * thickness_mm)) * (
         (equivalent_pressure_mpa * outside_diameter_mm / 2.0)
         + (poisson_ratio * equivalent_axial_load_n / (math.pi * outside_diameter_mm))
     )
-    term2 = (live_pressure_mpa * outside_diameter_mm) / (
+    term2 = (substrate_allowable_pressure_mpa * outside_diameter_mm) / (
         2.0 * hoop_modulus_mpa * thickness_mm
     )
-    term3 = (substrate_allowable_pressure_mpa * outside_diameter_mm) / (
-        (2.0 * hoop_modulus_mpa * thickness_mm)
-        + (substrate_modulus_mpa * remaining_wall_mm)
+    term3 = (live_pressure_mpa * outside_diameter_mm) / (
+        2.0
+        * (
+            (hoop_modulus_mpa * thickness_mm)
+            + (substrate_modulus_mpa * remaining_wall_mm)
+        )
     )
     return term1 - term2 - term3 - allowable_circ_strain
 
@@ -240,15 +248,15 @@ def calculate_type_a_class3(inputs: TypeAClass3Inputs) -> dict:
     ft1_delta = inputs.max_repair_temperature_c - inputs.design_temperature_c
     ft1 = 0.0000625 * ft1_delta**2 + 0.00125 * ft1_delta + 0.7
 
-    eps_c_noncyclic = (
-        ft1 * eps_c0
-        - (inputs.design_temperature_c - inputs.installation_temperature_c)
-        * (inputs.substrate_cte_per_c - inputs.hoop_cte_per_c)
+    # Formula (10) thermal-mismatch term. The absolute value is taken
+    # (conservative Annex K reading) so a favourable CTE mismatch can never
+    # increase the allowable strain.
+    delta_t_install = inputs.design_temperature_c - inputs.installation_temperature_c
+    eps_c_noncyclic = ft1 * eps_c0 - abs(
+        delta_t_install * (inputs.substrate_cte_per_c - inputs.hoop_cte_per_c)
     )
-    eps_a_noncyclic = (
-        ft1 * eps_a0
-        - (inputs.design_temperature_c - inputs.installation_temperature_c)
-        * (inputs.substrate_cte_per_c - inputs.axial_cte_per_c)
+    eps_a_noncyclic = ft1 * eps_a0 - abs(
+        delta_t_install * (inputs.substrate_cte_per_c - inputs.axial_cte_per_c)
     )
 
     eps_a = inputs.cyclic_derating_factor * eps_a_noncyclic
@@ -292,11 +300,20 @@ def calculate_type_a_class3(inputs: TypeAClass3Inputs) -> dict:
         3.0 * inputs.axial_modulus_mpa * eps_a * tdesign_base
     ) / inputs.lap_shear_mpa
 
-    if inputs.required_overlap_mm is None:
-        lover_required = max(25.0, lmin_transfer)
-        overlap_basis = "max_25mm_or_formula_21"
+    # Formula (18): geometric axial extent l_over = 2*sqrt(D*t), where t is
+    # the substrate nominal wall thickness. Minimum 50 mm per 7.5.8.
+    if inputs.nominal_wall_mm is not None and inputs.nominal_wall_mm > 0:
+        lover_geometric = 2.0 * math.sqrt(
+            inputs.outside_diameter_mm * inputs.nominal_wall_mm
+        )
     else:
-        lover_required = inputs.required_overlap_mm
+        lover_geometric = 0.0
+
+    if inputs.required_overlap_mm is None:
+        lover_required = max(50.0, lover_geometric, lmin_transfer)
+        overlap_basis = "max_50mm_formula_18_or_formula_21"
+    else:
+        lover_required = max(inputs.required_overlap_mm, 50.0)
         overlap_basis = "user_required_overlap"
 
     if (
@@ -311,7 +328,31 @@ def calculate_type_a_class3(inputs: TypeAClass3Inputs) -> dict:
 
     fth_stress = component_factor(inputs.component_type)
     tdesign_final = tdesign_base * fth_overlay * fth_stress
+
+    # Tee/nozzle pressure cap, Formula (33): p <= 2*Ec*eps_c*t/(D + Db).
+    # Enforced as an additional thickness requirement. Db defaults to D
+    # (conservative) when the branch diameter is not supplied.
+    tee_pressure_limit_mpa = None
+    if (inputs.component_type or "").strip().upper() == "TEE":
+        branch_d = inputs.tee_branch_diameter_mm or inputs.outside_diameter_mm
+        t_required_tee = (
+            peq
+            * (inputs.outside_diameter_mm + branch_d)
+            / (2.0 * inputs.hoop_modulus_mpa * eps_c)
+        )
+        tdesign_final = max(tdesign_final, t_required_tee)
+        tee_pressure_limit_mpa = (
+            2.0 * inputs.hoop_modulus_mpa * eps_c * tdesign_final
+            / (inputs.outside_diameter_mm + branch_d)
+        )
+
+    # 7.5.14 minimum laminate thickness (Type A): greater of 2 layers or 2 mm.
+    min_thickness_mm = max(2.0, 2.0 * inputs.layer_thickness_mm)
+    tdesign_final = max(tdesign_final, min_thickness_mm)
+
     layer_count = math.ceil(tdesign_final / inputs.layer_thickness_mm)
+    # Formula (20): taper length at >= 5:1 on the installed thickness.
+    taper_length_mm = 5.0 * (layer_count * inputs.layer_thickness_mm)
     d_limit = inputs.outside_diameter_mm / 12.0
 
     return {
@@ -333,7 +374,11 @@ def calculate_type_a_class3(inputs: TypeAClass3Inputs) -> dict:
         "tmin_a_mm": tmin_a,
         "tdesign_base_mm": tdesign_base,
         "lmin_transfer_mm": lmin_transfer,
+        "lover_geometric_mm": lover_geometric,
         "lover_required_mm": lover_required,
+        "taper_length_mm": taper_length_mm,
+        "min_thickness_floor_mm": min_thickness_mm,
+        "tee_pressure_limit_mpa": tee_pressure_limit_mpa,
         "overlap_basis": overlap_basis,
         "fth_overlay": fth_overlay,
         "fth_stress": fth_stress,
@@ -343,7 +388,9 @@ def calculate_type_a_class3(inputs: TypeAClass3Inputs) -> dict:
         "thickness_check_ok": tdesign_final < d_limit,
         "overlap_transfer_check_ok": lover_required >= lmin_transfer,
         "notes": [
-            "Axial extent Formulae 18/19 are not implemented in this route.",
+            "Overlap = max(50 mm, Formula 18 geometric 2*sqrt(D*t), Formula 21 load transfer).",
+            "Formula 18 requires nominal_wall_mm; when absent only the 50 mm floor and Formula 21 apply.",
+            "Total axial length per Formula 20: defect + 2*overlap + 2*taper (taper >= 5:1).",
             "Performance route uses supplied PRW110 eps_lt evidence when enabled.",
             "Pressure-only Feq default is used when equivalent axial load is not supplied.",
         ],
