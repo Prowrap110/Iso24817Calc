@@ -1,22 +1,11 @@
-import ast
-from pathlib import Path
 import unittest
 
-
-def load_prowrap_specs():
-    source = Path("PWR110Calculator.py").read_text()
-    tree = ast.parse(source)
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "PROWRAP":
-                    return ast.literal_eval(node.value)
-    raise AssertionError("PROWRAP material spec block was not found")
+from prowrap_materials import PROWRAP
 
 
 class ProwrapMaterialSpecsTest(unittest.TestCase):
     def test_specs_match_qualification_data_pdf(self):
-        specs = load_prowrap_specs()
+        specs = PROWRAP
 
         expected = {
             "ply_thickness": 0.83,
@@ -37,6 +26,7 @@ class ProwrapMaterialSpecsTest(unittest.TestCase):
             "thermal_expansion_axial": 22.81,
             "lap_shear": 14.7,
             "long_term_lap_shear": 9.62,
+            "long_term_strain_20y": 0.0055,
             "impact_peak_energy": 41.982,
             "short_term_survival": "PASS",
         }
@@ -45,13 +35,43 @@ class ProwrapMaterialSpecsTest(unittest.TestCase):
             self.assertEqual(specs[key], value)
 
     def test_temperature_limit_uses_tg_minus_20_degrees(self):
-        specs = load_prowrap_specs()
+        specs = PROWRAP
 
         self.assertAlmostEqual(
             specs["max_temp"],
             specs["glass_transition_temp"] - 20,
             places=2,
         )
+
+    def test_required_material_keys_are_present(self):
+        required_keys = {
+            "ply_thickness",
+            "modulus_circ",
+            "strain_fail",
+            "tensile_strength",
+            "modulus_axial",
+            "strain_fail_axial",
+            "tensile_strength_axial",
+            "poisson_circ",
+            "compressive_modulus",
+            "compressive_strength",
+            "shear_modulus",
+            "shore_d",
+            "glass_transition_temp",
+            "peak_exotherm_temp",
+            "thermal_expansion_circ",
+            "thermal_expansion_axial",
+            "lap_shear",
+            "long_term_lap_shear",
+            "long_term_strain_20y",
+            "impact_peak_energy",
+            "short_term_survival",
+            "max_temp",
+            "cloth_width_mm",
+            "stitching_overlap_mm",
+        }
+
+        self.assertEqual(set(PROWRAP), required_keys)
 
 
 if __name__ == "__main__":
