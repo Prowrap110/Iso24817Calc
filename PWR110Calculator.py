@@ -1,7 +1,11 @@
 import streamlit as st
 from fpdf import FPDF
 
-from prowrap_calculations import calculate_repair, calculate_type_a_class3_prowrap_check
+from prowrap_calculations import (
+    apply_type_a_class3_result_to_repair,
+    calculate_repair,
+    calculate_type_a_class3_prowrap_check,
+)
 from prowrap_materials import PROWRAP
 
 # --- 1. PAGE CONFIGURATION ---
@@ -196,6 +200,17 @@ def run_calculation(
                 "Type A / Class 3 check is limited to external corrosion cases in this version."
             )
 
+    if typea_class3_result:
+        report_data = apply_type_a_class3_result_to_repair(report_data, typea_class3_result)
+        num_plies = report_data["num_plies"]
+        final_thickness = report_data["final_thickness"]
+        total_repair_length_calc = report_data["iso_length"]
+        procurement_axial_length = report_data["proc_length"]
+        optimized_sqm = report_data["optimized_sqm"]
+        epoxy_kg = report_data["epoxy_kg"]
+        is_upgraded = report_data["is_upgraded"]
+        num_bands = report_data["num_bands"]
+
     st.success(f"✅ Calculation Complete")
 
     m1, m2, m3, m4, m5 = st.columns(5)
@@ -345,7 +360,7 @@ def main():
         df = st.sidebar.number_input("Design Factor (f)", value=0.72, min_value=0.1, max_value=1.0, on_change=reset_calc)
 
         st.sidebar.header("6. ISO Type A / Class 3 Check")
-        show_typea_class3_check = st.sidebar.checkbox("Show Type A / Class 3 check", value=False, on_change=reset_calc)
+        show_typea_class3_check = st.sidebar.checkbox("Show Type A / Class 3 check", value=True, on_change=reset_calc)
         substrate_allowable_pressure = st.sidebar.number_input("Allowable substrate pressure [bar]", value=0.0, min_value=0.0, on_change=reset_calc)
         installation_temp = st.sidebar.number_input("Installation temperature [°C]", value=20.0, on_change=reset_calc)
         component_type = st.sidebar.selectbox("Component type", ["Straight", "Bend", "Tee", "Flange", "Reducer"], on_change=reset_calc)

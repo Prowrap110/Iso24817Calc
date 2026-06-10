@@ -250,3 +250,47 @@ def calculate_type_a_class3_prowrap_check(
 
 
 calculate_type_a_class3_fallback_check = calculate_type_a_class3_prowrap_check
+
+
+def apply_type_a_class3_result_to_repair(repair_data, typea_class3_result):
+    """Use the ISO Type A/Class 3 result as the controlling displayed repair design."""
+    updated = dict(repair_data)
+    layer_count = typea_class3_result["layer_count"]
+    final_installed_thickness = layer_count * PROWRAP["ply_thickness"]
+    overlap_length = typea_class3_result["lover_required_mm"]
+    repair_length = updated["length"] + (2.0 * overlap_length)
+
+    if repair_length <= PROWRAP["cloth_width_mm"]:
+        num_bands = 1
+        procurement_axial_length = PROWRAP["cloth_width_mm"]
+    else:
+        num_bands = math.ceil(
+            (repair_length - PROWRAP["cloth_width_mm"])
+            / (PROWRAP["cloth_width_mm"] - PROWRAP["stitching_overlap_mm"])
+        ) + 1
+        procurement_axial_length = num_bands * PROWRAP["cloth_width_mm"]
+
+    circumference_m = (math.pi * updated["od"]) / 1000.0
+    axial_procurement_m = procurement_axial_length / 1000.0
+    optimized_sqm = axial_procurement_m * circumference_m * layer_count
+
+    updated.update(
+        {
+            "calc_method_thick": "ISO 24817 Type A / Class 3",
+            "calc_method_overlap": "ISO 24817 Formula 21",
+            "t_required": typea_class3_result["tdesign_final_mm"],
+            "num_plies": layer_count,
+            "final_thickness": final_installed_thickness,
+            "iso_length": repair_length,
+            "overlap_length": overlap_length,
+            "overlap_shear_basis": "iso_formula_21",
+            "overlap_shear_strength": PROWRAP["long_term_lap_shear"],
+            "num_bands": num_bands,
+            "proc_length": procurement_axial_length,
+            "optimized_sqm": optimized_sqm,
+            "epoxy_kg": optimized_sqm * 1.2,
+            "is_upgraded": False,
+            "iso_typea_class3": typea_class3_result,
+        }
+    )
+    return updated
