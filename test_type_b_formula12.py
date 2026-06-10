@@ -55,5 +55,16 @@ class TypeBFormula12Test(unittest.TestCase):
         self.assertEqual(result["num_plies"], 34)
 
 
+    def test_type_b_minimum_is_impact_qualified_3_layers(self):
+        # Small leak at low pressure: Formula 12 thickness is tiny, so the
+        # Annex F impact-qualified minimum of 3 layers governs.
+        result = calculate_repair(
+            **default_inputs(defect_type="Leak", length=15.0, pressure=2.0)
+        )
+
+        self.assertTrue(result["type_b_details"]["repairable_formula12"])
+        self.assertEqual(result["num_plies"], 3)
+
+
 if __name__ == "__main__":
     unittest.main()

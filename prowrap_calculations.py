@@ -229,10 +229,14 @@ def calculate_repair(
             t_required = max(t_required, t_type_b)
 
     num_plies = math.ceil(t_required / PROWRAP["ply_thickness"])
-    # ISO 24817 7.5.14: minimum laminate thickness is the greater of
-    # 2 layers or 2 mm (3 plies at 0.83 mm/ply).
+    # ISO 24817 7.5.14: Type A minimum is the greater of 2 layers or 2 mm
+    # (3 plies at 0.83 mm/ply). Type B minimum is the Annex F
+    # impact-qualified layer count (3 layers for PRW110).
     min_plies_iso = math.ceil(2.0 / PROWRAP["ply_thickness"])
-    min_plies = max(4 if defect_type == "Leak" else 2, min_plies_iso)
+    if "Type B" in calc_method_thick:
+        min_plies = max(PROWRAP["type_b_min_layers"], min_plies_iso)
+    else:
+        min_plies = min_plies_iso
     num_plies = max(num_plies, min_plies)
 
     is_upgraded = False
@@ -293,9 +297,8 @@ def calculate_repair(
             "Type B design assumes a circular/near-circular defect of size "
             f"{type_b_details['defect_size_used_mm']:.0f} mm at END of the "
             "design life (defect growth must be projected by the assessor). "
-            "ISO 24817 Type B minimum thickness is the Annex F "
-            "impact-qualified thickness unless the owner agrees third-party "
-            "impact is unlikely."
+            "Annex F impact-qualified minimum of "
+            f"{PROWRAP['type_b_min_layers']} layers applied."
         )
         if type_b_details is not None and not type_b_details["d_within_validity"]:
             compliance_warnings.append(
