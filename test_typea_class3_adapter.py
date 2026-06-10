@@ -34,14 +34,14 @@ class TypeAClass3AdapterTest(unittest.TestCase):
         self.assertGreater(result["tdesign_final_mm"], 0)
         self.assertGreaterEqual(result["layer_count"], 1)
 
-    def test_iso_result_can_drive_displayed_repair_metrics(self):
+    def test_iso_result_can_drive_displayed_repair_metrics_when_pressure_deficit_exists(self):
         repair = calculate_repair(
             customer="PROTAP",
             location="Turkey",
             report_no="24-152",
             od=457.2,
             wall=9.53,
-            pressure=50.0,
+            pressure=60.0,
             temp=40.0,
             defect_type="Corrosion",
             defect_loc="External",
@@ -53,22 +53,24 @@ class TypeAClass3AdapterTest(unittest.TestCase):
         )
         iso_result = calculate_type_a_class3_prowrap_check(
             od=457.2,
-            pressure_bar=50.0,
+            pressure_bar=60.0,
             temp=40.0,
             rem_wall=4.5,
             design_life=20,
+            substrate_allowable_pressure_bar=substrate_credit_bar_for_iso_check(repair),
         )
 
         updated = apply_type_a_class3_result_to_repair(repair, iso_result)
 
         self.assertEqual(repair["num_plies"], 2)
-        self.assertEqual(updated["num_plies"], 12)
+        self.assertEqual(updated["num_plies"], 9)
+        self.assertTrue(updated["iso_typea_class3_controls"])
         self.assertAlmostEqual(updated["t_required"], iso_result["tdesign_final_mm"])
-        self.assertAlmostEqual(updated["final_thickness"], 12 * PROWRAP["ply_thickness"])
+        self.assertAlmostEqual(updated["final_thickness"], 9 * PROWRAP["ply_thickness"])
         self.assertAlmostEqual(updated["overlap_length"], iso_result["lover_required_mm"])
         self.assertAlmostEqual(updated["iso_length"], 100.0 + 2 * iso_result["lover_required_mm"])
-        self.assertEqual(updated["num_bands"], 3)
-        self.assertEqual(updated["proc_length"], 900)
+        self.assertEqual(updated["num_bands"], 2)
+        self.assertEqual(updated["proc_length"], 600)
 
     def test_external_non_leak_crack_uses_effective_pipe_capacity_as_substrate_credit(self):
         repair = calculate_repair(
@@ -101,7 +103,10 @@ class TypeAClass3AdapterTest(unittest.TestCase):
 
         self.assertAlmostEqual(credit_bar, repair["p_steel_capacity"] * 10.0)
         self.assertGreaterEqual(credit_bar, 50.0)
-        self.assertEqual(updated["num_plies"], 8)
+        self.assertEqual(iso_result["layer_count"], 8)
+        self.assertEqual(updated["num_plies"], 2)
+        self.assertFalse(updated["iso_typea_class3_controls"])
+        self.assertEqual(updated["iso_typea_class3_noncontrolling_reason"], "effective_pipe_capacity_covers_design_pressure")
         self.assertAlmostEqual(
             iso_result["input_summary"]["substrate_allowable_pressure_bar"],
             credit_bar,

@@ -257,8 +257,23 @@ def run_calculation(
                     f"**Substrate Credit:** {substrate_allowable_pressure:.1f} bar "
                     f"({substrate_allowable_pressure * 0.1:.2f} MPa effective pipe capacity)"
                 )
-                st.write(f"**Final Thickness:** {typea_class3_result['tdesign_final_mm']:.2f} mm")
-                st.write(f"**Layer Count:** {typea_class3_result['layer_count']}")
+                if not report_data.get("iso_typea_class3_controls", True):
+                    st.write(
+                        "**Structural Control:** Not controlling; effective pipe capacity "
+                        "covers design pressure."
+                    )
+                    st.write(
+                        f"**Non-controlling ISO Thickness:** "
+                        f"{typea_class3_result['tdesign_final_mm']:.2f} mm"
+                    )
+                    st.write(
+                        f"**Non-controlling ISO Layer Count:** "
+                        f"{typea_class3_result['layer_count']}"
+                    )
+                else:
+                    st.write("**Structural Control:** ISO Type A / Class 3 controls displayed plies.")
+                    st.write(f"**Final Thickness:** {typea_class3_result['tdesign_final_mm']:.2f} mm")
+                    st.write(f"**Layer Count:** {typea_class3_result['layer_count']}")
                 st.write(f"**Required Overlap:** {typea_class3_result['lover_required_mm']:.1f} mm")
                 st.write(f"**Component Factor:** {typea_class3_result['fth_stress']:.2f}")
                 st.write(

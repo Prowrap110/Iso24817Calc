@@ -264,6 +264,16 @@ def substrate_credit_bar_for_iso_check(repair_data):
 def apply_type_a_class3_result_to_repair(repair_data, typea_class3_result):
     """Use the ISO Type A/Class 3 result as the controlling displayed repair design."""
     updated = dict(repair_data)
+    updated["iso_typea_class3"] = typea_class3_result
+    if updated["p_composite_design"] <= 0:
+        updated["iso_typea_class3_controls"] = False
+        updated["iso_typea_class3_noncontrolling_reason"] = (
+            "effective_pipe_capacity_covers_design_pressure"
+        )
+        return updated
+
+    updated["iso_typea_class3_controls"] = True
+    updated["iso_typea_class3_noncontrolling_reason"] = None
     layer_count = typea_class3_result["layer_count"]
     final_installed_thickness = layer_count * PROWRAP["ply_thickness"]
     overlap_length = typea_class3_result["lover_required_mm"]
@@ -299,7 +309,6 @@ def apply_type_a_class3_result_to_repair(repair_data, typea_class3_result):
             "optimized_sqm": optimized_sqm,
             "epoxy_kg": optimized_sqm * 1.2,
             "is_upgraded": False,
-            "iso_typea_class3": typea_class3_result,
         }
     )
     return updated
