@@ -58,6 +58,19 @@ class CurrentCalculationBaselineTest(unittest.TestCase):
         self.assertAlmostEqual(result["p_steel_capacity"], 0.0)
         self.assertGreaterEqual(result["num_plies"], 4)
 
+    def test_external_corrosion_keeps_pipe_capacity_down_to_one_mm_remaining_wall(self):
+        result = calculate_repair(**default_inputs(rem_wall=2.0))
+
+        self.assertAlmostEqual(result["wall_loss_ratio"], 0.7901364113326338)
+        self.assertEqual(result["calc_method_thick"], "Type A (Load Sharing)")
+        self.assertAlmostEqual(result["p_steel_capacity"], 2.261417322834646)
+
+    def test_remaining_wall_below_one_mm_sets_pipe_capacity_to_zero(self):
+        result = calculate_repair(**default_inputs(rem_wall=0.9))
+
+        self.assertEqual(result["calc_method_thick"], "Type B (Total Replacement)")
+        self.assertAlmostEqual(result["p_steel_capacity"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

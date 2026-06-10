@@ -79,13 +79,13 @@ def calculate_repair(
     )
 
     wall_loss_ratio = (wall - rem_wall) / wall
-    is_severe_loss = wall_loss_ratio > 0.65
+    has_no_substrate_capacity = rem_wall < 1.0
 
     calc_method_thick = "Type B (Total Replacement)"
     calc_method_overlap = "Type B (Shear Controlled)"
 
     if defect_type == "Corrosion":
-        if defect_loc == "External" and not is_severe_loss:
+        if defect_loc == "External" and not has_no_substrate_capacity:
             calc_method_thick = "Type A (Load Sharing)"
             calc_method_overlap = "Type A (Geometry Controlled)"
         else:
@@ -106,7 +106,11 @@ def calculate_repair(
     allowable_steel_stress = yield_strength * design_factor
     theoretical_capacity = (2 * allowable_steel_stress * rem_wall) / od
 
-    if defect_type in ["Leak", "Crack"] or defect_loc == "Internal" or is_severe_loss:
+    if (
+        defect_type in ["Leak", "Crack"]
+        or defect_loc == "Internal"
+        or has_no_substrate_capacity
+    ):
         p_steel_capacity = 0.0
     else:
         p_steel_capacity = theoretical_capacity
@@ -173,7 +177,8 @@ def calculate_repair(
         "rem_wall": rem_wall,
         "length": length,
         "wall_loss_ratio": wall_loss_ratio,
-        "is_severe_loss": is_severe_loss,
+        "has_no_substrate_capacity": has_no_substrate_capacity,
+        "is_severe_loss": has_no_substrate_capacity,
         "calc_method_thick": calc_method_thick,
         "calc_method_overlap": calc_method_overlap,
         "safety_factor": safety_factor,
