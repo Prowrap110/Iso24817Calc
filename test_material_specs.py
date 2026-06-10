@@ -26,6 +26,7 @@ class ProwrapMaterialSpecsTest(unittest.TestCase):
             "thermal_expansion_axial": 22.81,
             "lap_shear": 14.7,
             "long_term_lap_shear": 9.62,
+            "long_term_strain_20y": 0.0055,
             "impact_peak_energy": 41.982,
             "short_term_survival": "PASS",
         }
@@ -62,7 +63,11 @@ class ProwrapMaterialSpecsTest(unittest.TestCase):
             "thermal_expansion_axial",
             "lap_shear",
             "long_term_lap_shear",
+<<<<<<< HEAD
             "long_term_strain_lcl",
+=======
+            "long_term_strain_20y",
+>>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
             "impact_peak_energy",
             "short_term_survival",
             "max_temp",

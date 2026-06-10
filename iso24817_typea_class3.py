@@ -252,11 +252,15 @@ def calculate_type_a_class3(inputs: TypeAClass3Inputs) -> dict:
     )
 
     eps_a = inputs.cyclic_derating_factor * eps_a_noncyclic
+<<<<<<< HEAD
     if inputs.use_performance_data:
         # Formula 25: the cyclic factor applies to allowable strains on the
         # performance route (Formula 11) as well.
         eps_c = inputs.cyclic_derating_factor * eps_c
     else:
+=======
+    if not inputs.use_performance_data:
+>>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
         eps_c = inputs.cyclic_derating_factor * eps_c_noncyclic
 
     if eps_c <= 0:
@@ -321,6 +325,10 @@ def calculate_type_a_class3(inputs: TypeAClass3Inputs) -> dict:
         "feq_n": feq,
         "fperf": fperf,
         "ft2": ft2,
+<<<<<<< HEAD
+=======
+        "long_term_strain_lcl": inputs.long_term_strain_lcl,
+>>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
         "ft1": ft1,
         "eps_c0": eps_c0,
         "eps_a0": eps_a0,
@@ -343,7 +351,11 @@ def calculate_type_a_class3(inputs: TypeAClass3Inputs) -> dict:
         "overlap_transfer_check_ok": lover_required >= lmin_transfer,
         "notes": [
             "Axial extent Formulae 18/19 are not implemented in this route.",
+<<<<<<< HEAD
             "Performance route requires approved PRW110 eps_lt evidence.",
+=======
+            "Performance route uses supplied PRW110 eps_lt evidence when enabled.",
+>>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
             "Pressure-only Feq default is used when equivalent axial load is not supplied.",
         ],
     }

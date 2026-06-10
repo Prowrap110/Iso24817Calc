@@ -23,8 +23,12 @@ PROWRAP = {
     "thermal_expansion_axial": 22.81,  # ppm/K, axial, ASTM E831
     "lap_shear": 14.7,                 # MPa, ASTM D3165
     "long_term_lap_shear": 9.62,       # MPa, ASTM D3165
+<<<<<<< HEAD
     "long_term_strain_lcl": 0.0055,    # mm/mm (0.55 %), eps_lt, 95% LCL long-term strain,
                                        # ISO 24817 Annex E performance data (Formula 11 route)
+=======
+    "long_term_strain_20y": 0.0055,    # mm/mm, 0.55% long-term strain at 20 years
+>>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
     "impact_peak_energy": 41.982,      # J, ASTM D7136
     "short_term_survival": "PASS",     # ISO 24817
     "max_temp": 58.18,                 # degC, Tg minus 20 degC design limit

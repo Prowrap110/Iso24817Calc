@@ -1,4 +1,8 @@
 __pycache__/
+<<<<<<< HEAD
 *.pyc
 .venv/
 iso24817calc-venv/
+=======
+*.py[cod]
+>>>>>>> 8a68a750f614bab57c90dd4beb691606cebee890
