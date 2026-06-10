@@ -257,6 +257,19 @@ def run_calculation(
             st.markdown("### Structural Design")
             st.write(f"**Composite Design Pressure:** {p_composite_design:.2f} MPa")
             st.write(f"**Design Strain Limit:** {design_strain*100:.3f}% (ISO 24817 Formula 11: fperf x fT2 x eps_lt)")
+            type_b_details = report_data.get("type_b_details")
+            if type_b_details:
+                st.markdown("### Type B Check (ISO Formula 12)")
+                st.write(f"**gamma_LCL:** {type_b_details['gamma_lcl_j_m2']:.0f} J/m²")
+                st.write(f"**Defect Size (end of life):** {type_b_details['defect_size_used_mm']:.0f} mm")
+                st.write(f"**f_leak (Formula 16):** {type_b_details['fleak']:.3f}")
+                st.write(f"**Max Achievable Pressure (asymptote):** {type_b_details['p_max_asymptote_mpa']:.2f} MPa")
+                if type_b_details.get("repairable_formula12", True):
+                    st.write(f"**Formula 12 Thickness:** {type_b_details['t_formula12_mm']:.2f} mm")
+                else:
+                    st.write("**Formula 12 Thickness:** NO SOLUTION - defect not repairable at this pressure")
+                st.write(f"**Type A Thickness (7.5.7 max rule):** {type_b_details['t_typea_mm']:.2f} mm")
+                st.write(f"**Validity d <= 6*sqrt(D*t):** {'OK' if type_b_details['d_within_validity'] else 'EXCEEDED'}")
             st.write(f"**Design Factor (f):** {design_factor}")
 
         if show_typea_class3_check:

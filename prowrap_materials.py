@@ -27,6 +27,8 @@ PROWRAP = {
                                        # ISO 24817 Annex E performance data (Formula 11 route)
     "long_term_strain_20y": 0.0055,    # mm/mm, 0.55% long-term strain at 20 years
                                        # (same value as long_term_strain_lcl, legacy key)
+    "gamma_lcl": 250.0,                # J/m^2, energy release rate 95% LCL,
+                                       # ISO 24817 Annex D (Type B / Formula 12 route)
     "impact_peak_energy": 41.982,      # J, ASTM D7136
     "short_term_survival": "PASS",     # ISO 24817
     "max_temp": 58.18,                 # degC, Tg minus 20 degC design limit

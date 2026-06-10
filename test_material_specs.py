@@ -65,6 +65,7 @@ class ProwrapMaterialSpecsTest(unittest.TestCase):
             "long_term_lap_shear",
             "long_term_strain_lcl",
             "long_term_strain_20y",
+            "gamma_lcl",
             "impact_peak_energy",
             "short_term_survival",
             "max_temp",

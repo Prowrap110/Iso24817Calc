@@ -48,6 +48,81 @@ def _validate_inputs(
         raise ValueError("\n".join(errors))
 
 
+def iso_type_b_min_thickness(
+    pressure_mpa,
+    od_mm,
+    nominal_wall_mm,
+    defect_size_mm,
+    design_temp_c,
+    design_life_years,
+):
+    """ISO 24817 Formula (12) - minimum laminate thickness for a circular or
+    near-circular through-wall (Type B) defect.
+
+    p = fT2 * fleak * sqrt(0.001 * gamma_LCL / X)
+    X = ((1 - nu^2)/E_ac) * (3*d^4/(512*t^3) + d/pi) + 3*d^2/(64*G*t)
+
+    with E_ac = sqrt(Ea*Ec), fleak per Formula (16) Class 3 and gamma_LCL
+    from the PRW110 Annex D qualification. Solved for the smallest t whose
+    allowable pressure reaches the design pressure.
+
+    Returns (t_min_mm, details_dict).
+    """
+    gamma_lcl = PROWRAP["gamma_lcl"]
+    e_ac = math.sqrt(PROWRAP["modulus_axial"] * PROWRAP["modulus_circ"])
+    g = PROWRAP["shear_modulus"]
+    nu = PROWRAP["poisson_circ"]
+
+    # Defect size at end of design life; never less than 15 mm (7.5.7).
+    d = max(defect_size_mm, 15.0)
+
+    # Formula (16), Class 3 service factor.
+    fleak = 0.666 * 10 ** (-0.01584 * (design_life_years - 1.0))
+    # Table 8 polynomial; Ttest == Tamb in the PRW110 qualification.
+    ft2_delta = PROWRAP["max_temp"] - design_temp_c
+    ft2 = 0.0000625 * ft2_delta**2 + 0.00125 * ft2_delta + 0.7
+
+    def allowable_pressure(t):
+        x = ((1.0 - nu * nu) / e_ac) * (
+            3.0 * d**4 / (512.0 * t**3) + d / math.pi
+        ) + 3.0 * d * d / (64.0 * g * t)
+        return ft2 * fleak * math.sqrt(0.001 * gamma_lcl / x)
+
+    # Asymptotic limit: as t -> infinity, X -> ((1-nu^2)/E_ac)*(d/pi), so
+    # there is a maximum achievable pressure regardless of thickness.
+    x_asymptote = ((1.0 - nu * nu) / e_ac) * (d / math.pi)
+    p_max_asymptote = ft2 * fleak * math.sqrt(0.001 * gamma_lcl / x_asymptote)
+
+    # Formula (12) validity: d <= 6*sqrt(D*t_substrate).
+    d_validity_limit = 6.0 * math.sqrt(od_mm * nominal_wall_mm)
+    details = {
+        "defect_size_used_mm": d,
+        "fleak": fleak,
+        "ft2": ft2,
+        "gamma_lcl_j_m2": gamma_lcl,
+        "e_ac_mpa": e_ac,
+        "p_max_asymptote_mpa": p_max_asymptote,
+        "d_validity_limit_mm": d_validity_limit,
+        "d_within_validity": d <= d_validity_limit,
+    }
+
+    if pressure_mpa >= 0.999 * p_max_asymptote:
+        details["repairable_formula12"] = False
+        return None, details
+    details["repairable_formula12"] = True
+
+    lower, upper = 0.01, 1.0
+    while allowable_pressure(upper) < pressure_mpa:
+        upper *= 2.0
+    for _ in range(200):
+        mid = 0.5 * (lower + upper)
+        if allowable_pressure(mid) < pressure_mpa:
+            lower = mid
+        else:
+            upper = mid
+    return upper, details
+
+
 def calculate_repair(
     customer,
     location,
@@ -135,6 +210,24 @@ def calculate_repair(
     else:
         t_required = 0.0
 
+    # Type B (through-wall) designs must satisfy BOTH the Formula (12)
+    # energy-release-rate equation and the Type A equations (7.5.7):
+    # take the maximum thickness.
+    type_b_details = None
+    if "Type B" in calc_method_thick and pressure_mpa > 0:
+        t_type_b, type_b_details = iso_type_b_min_thickness(
+            pressure_mpa=pressure_mpa,
+            od_mm=od,
+            nominal_wall_mm=wall,
+            defect_size_mm=length,
+            design_temp_c=temp,
+            design_life_years=design_life,
+        )
+        type_b_details["t_formula12_mm"] = t_type_b
+        type_b_details["t_typea_mm"] = t_required
+        if t_type_b is not None:
+            t_required = max(t_required, t_type_b)
+
     num_plies = math.ceil(t_required / PROWRAP["ply_thickness"])
     # ISO 24817 7.5.14: minimum laminate thickness is the greater of
     # 2 layers or 2 mm (3 plies at 0.83 mm/ply).
@@ -181,14 +274,37 @@ def calculate_repair(
     epoxy_kg = optimized_sqm * 1.2
 
     compliance_warnings = []
+    if (
+        type_b_details is not None
+        and not type_b_details.get("repairable_formula12", True)
+    ):
+        compliance_warnings.append(
+            "NOT REPAIRABLE PER ISO 24817 FORMULA 12: the maximum achievable "
+            f"pressure for a {type_b_details['defect_size_used_mm']:.0f} mm "
+            "through-wall defect with PRW110 (gamma_LCL = "
+            f"{type_b_details['gamma_lcl_j_m2']:.0f} J/m2) is "
+            f"{type_b_details['p_max_asymptote_mpa']:.2f} MPa, below the "
+            f"design pressure of {pressure_mpa:.2f} MPa. No laminate "
+            "thickness can satisfy Formula 12 - do not install this repair; "
+            "reduce pressure, reduce the defect size, or use another method."
+        )
     if "Type B" in calc_method_thick:
         compliance_warnings.append(
-            "Type B (through-wall / leak) designs require the ISO 24817 "
-            "Formula 12 energy-release-rate method with qualified gamma_LCL "
-            "data (Annex D), which is not available for PRW110. This result "
-            "is NOT an ISO 24817 Type B design and must not be used for "
-            "leaking or through-wall defects without that qualification."
+            "Type B design assumes a circular/near-circular defect of size "
+            f"{type_b_details['defect_size_used_mm']:.0f} mm at END of the "
+            "design life (defect growth must be projected by the assessor). "
+            "ISO 24817 Type B minimum thickness is the Annex F "
+            "impact-qualified thickness unless the owner agrees third-party "
+            "impact is unlikely."
         )
+        if type_b_details is not None and not type_b_details["d_within_validity"]:
+            compliance_warnings.append(
+                "Formula 12 validity exceeded: defect size "
+                f"{type_b_details['defect_size_used_mm']:.0f} mm > "
+                f"6*sqrt(D*t) = {type_b_details['d_validity_limit_mm']:.0f} mm. "
+                "The Type B result is outside the validated range - an "
+                "engineered assessment is required."
+            )
     if p_steel_capacity > 0:
         compliance_warnings.append(
             "Substrate pressure capacity is estimated by Barlow on the "
@@ -238,6 +354,7 @@ def calculate_repair(
         "overlap_shear_strength": overlap_shear_strength,
         "eps_lt": eps_lt,
         "fperf": fperf,
+        "type_b_details": type_b_details,
         "thickness_check_ok": thickness_check_ok,
         "compliance_warnings": compliance_warnings,
         "num_bands": num_bands,
