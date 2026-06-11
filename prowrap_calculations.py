@@ -477,8 +477,16 @@ def calculate_type_a_class3_prowrap_check(
     component_type="Straight",
     cyclic_derating_factor=1.0,
     nominal_wall_mm=None,
+    axial_load_n=0.0,
 ):
     """Run the isolated ISO Type A/Class 3 route using PRW110 performance data.
+
+    axial_load_n: applied axial load on the laminate in N (default 0).
+    Design basis: continuous restrained pipeline - the ISO Formula 4
+    pressure end-thrust term (pi/4 * p * D^2) is NOT applied; the pipe
+    wall and soil restraint carry pressure-induced axial load. Enter an
+    explicit axial load only when defects or routing impose one on the
+    repair.
 
     Uses the ISO 24817 7.5.6 performance route (Formula 11,
     eps_c = fperf * fT2 * eps_lt) when PRW110 long-term strain LCL data is
@@ -506,6 +514,7 @@ def calculate_type_a_class3_prowrap_check(
         use_performance_data=eps_lt is not None,
         long_term_strain_lcl=eps_lt,
         performance_data_source="Design life",
+        equivalent_axial_load_n=axial_load_n,
         cyclic_derating_factor=cyclic_derating_factor,
         component_type=component_type,
         nominal_wall_mm=nominal_wall_mm,

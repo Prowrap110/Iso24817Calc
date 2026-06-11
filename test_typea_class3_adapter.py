@@ -59,6 +59,24 @@ class TypeAClass3AdapterTest(unittest.TestCase):
         )
         self.assertAlmostEqual(derated["eps_c"], 0.5 * base["eps_c"], places=9)
 
+    def test_restrained_pipeline_axial_basis(self):
+        # Default: no axial load on the laminate (restrained pipeline,
+        # end-thrust carried by pipe wall and soil restraint).
+        iso = calculate_type_a_class3_prowrap_check(
+            od=457.2, pressure_bar=50.0, temp=40.0, rem_wall=4.5,
+            design_life=20, nominal_wall_mm=9.53,
+        )
+        self.assertEqual(iso["feq_n"], 0.0)
+        self.assertEqual(iso["tmin_a_mm"], 0.0)
+
+        # Explicit axial load is honoured when supplied.
+        iso2 = calculate_type_a_class3_prowrap_check(
+            od=457.2, pressure_bar=50.0, temp=40.0, rem_wall=4.5,
+            design_life=20, nominal_wall_mm=9.53, axial_load_n=200e3,
+        )
+        self.assertEqual(iso2["feq_n"], 200000.0)
+        self.assertAlmostEqual(iso2["tmin_a_mm"], 0.9255167684230746)
+
     def test_iso_result_can_drive_displayed_repair_metrics_when_pressure_deficit_exists(self):
         # 110 bar exceeds the B31G safe pressure (P_S = 9.95 MPa), so a
         # genuine pressure deficit exists and the ISO result controls.
@@ -92,10 +110,12 @@ class TypeAClass3AdapterTest(unittest.TestCase):
 
         self.assertFalse(repair["b31g_details"]["acceptable"])
         self.assertGreater(repair["p_composite_design"], 0)
-        self.assertEqual(updated["num_plies"], 19)
+        # Restrained-pipeline axial basis (no end-thrust): circumferential
+        # requirement 1.92 mm -> 2 mm / 2-layer floor -> 3 plies.
+        self.assertEqual(updated["num_plies"], 3)
         self.assertTrue(updated["iso_typea_class3_controls"])
         self.assertAlmostEqual(updated["t_required"], iso_result["tdesign_final_mm"])
-        self.assertAlmostEqual(updated["final_thickness"], 19 * PROWRAP["ply_thickness"])
+        self.assertAlmostEqual(updated["final_thickness"], 3 * PROWRAP["ply_thickness"])
         self.assertAlmostEqual(updated["overlap_length"], iso_result["lover_required_mm"])
         self.assertAlmostEqual(
             updated["iso_length"],
@@ -103,8 +123,8 @@ class TypeAClass3AdapterTest(unittest.TestCase):
             + 2 * iso_result["lover_required_mm"]
             + 2 * iso_result["taper_length_mm"],
         )
-        self.assertEqual(updated["num_bands"], 4)
-        self.assertEqual(updated["proc_length"], 1200)
+        self.assertEqual(updated["num_bands"], 2)
+        self.assertEqual(updated["proc_length"], 600)
 
     def test_external_non_leak_crack_uses_effective_pipe_capacity_as_substrate_credit(self):
         repair = calculate_repair(
@@ -139,7 +159,9 @@ class TypeAClass3AdapterTest(unittest.TestCase):
         self.assertAlmostEqual(credit_bar, repair["p_steel_capacity"] * 10.0)
         # B31G Modified P_S = 9.95 MPa -> 99.5 bar substrate credit.
         self.assertAlmostEqual(credit_bar, 99.51873620726573)
-        self.assertEqual(iso_result["layer_count"], 9)
+        # Substrate covers the pressure and no axial load is applied
+        # (restrained pipeline): minimum-thickness floor governs.
+        self.assertEqual(iso_result["layer_count"], 3)
         self.assertEqual(updated["num_plies"], 3)
         self.assertFalse(updated["iso_typea_class3_controls"])
         self.assertEqual(updated["iso_typea_class3_noncontrolling_reason"], "effective_pipe_capacity_covers_design_pressure")

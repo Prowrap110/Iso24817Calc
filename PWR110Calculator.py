@@ -150,6 +150,7 @@ def run_calculation(
     component_type="Straight",
     cyclic_derating_factor=1.0,
     internal_corrosion_rate=0.0,
+    axial_load_kn=0.0,
 ):
     try:
         report_data = calculate_repair(
@@ -205,6 +206,7 @@ def run_calculation(
                     installation_temp=installation_temp,
                     component_type=component_type,
                     cyclic_derating_factor=cyclic_derating_factor,
+                    axial_load_n=axial_load_kn * 1000.0,
                 )
             except ValueError as exc:
                 typea_class3_note = str(exc)
@@ -289,6 +291,10 @@ def run_calculation(
         if show_typea_class3_check:
             st.markdown("### ISO Type A / Class 3 Check")
             if typea_class3_result:
+                st.write(
+                    f"**Axial Load Basis:** restrained pipeline; laminate axial load = {axial_load_kn:.1f} kN "
+                    "(pressure end-thrust carried by pipe wall and soil restraint)"
+                )
                 if typea_class3_result["circumferential_strain_basis"] == "performance_data":
                     st.write(
                         "**Basis:** PRW110 performance data "
@@ -435,6 +441,10 @@ def main():
         installation_temp = st.sidebar.number_input("Installation temperature [°C]", value=20.0, on_change=reset_calc)
         component_type = st.sidebar.selectbox("Component type", ["Straight", "Bend", "Tee", "Flange", "Reducer"], on_change=reset_calc)
         cyclic_derating_factor = st.sidebar.number_input("Cyclic derating factor", value=1.0, min_value=0.01, max_value=1.0, on_change=reset_calc)
+        axial_load_kn = st.sidebar.number_input(
+            "Additional axial load on repair [kN]", value=0.0, min_value=0.0,
+            on_change=reset_calc,
+            help="Restrained pipeline basis: pressure end-thrust is carried by the pipe wall and soil restraint, not the laminate. Enter a value only if defects or routing impose axial load on the repair.")
         
         if st.sidebar.button("Calculate & Optimize", type="primary"):
             st.session_state.calc_active = True
@@ -461,6 +471,7 @@ def main():
                 component_type,
                 cyclic_derating_factor,
                 corr_rate,
+                axial_load_kn,
             )
             
     except Exception as e:
