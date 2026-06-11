@@ -60,13 +60,15 @@ class TypeAClass3AdapterTest(unittest.TestCase):
         self.assertAlmostEqual(derated["eps_c"], 0.5 * base["eps_c"], places=9)
 
     def test_iso_result_can_drive_displayed_repair_metrics_when_pressure_deficit_exists(self):
+        # 110 bar exceeds the B31G safe pressure (P_S = 9.95 MPa), so a
+        # genuine pressure deficit exists and the ISO result controls.
         repair = calculate_repair(
             customer="PROTAP",
             location="Turkey",
             report_no="24-152",
             od=457.2,
             wall=9.53,
-            pressure=60.0,
+            pressure=110.0,
             temp=40.0,
             defect_type="Corrosion",
             defect_loc="External",
@@ -78,7 +80,7 @@ class TypeAClass3AdapterTest(unittest.TestCase):
         )
         iso_result = calculate_type_a_class3_prowrap_check(
             od=457.2,
-            pressure_bar=60.0,
+            pressure_bar=110.0,
             temp=40.0,
             rem_wall=4.5,
             design_life=20,
@@ -88,11 +90,12 @@ class TypeAClass3AdapterTest(unittest.TestCase):
 
         updated = apply_type_a_class3_result_to_repair(repair, iso_result)
 
-        self.assertEqual(repair["num_plies"], 3)
-        self.assertEqual(updated["num_plies"], 11)
+        self.assertFalse(repair["b31g_details"]["acceptable"])
+        self.assertGreater(repair["p_composite_design"], 0)
+        self.assertEqual(updated["num_plies"], 19)
         self.assertTrue(updated["iso_typea_class3_controls"])
         self.assertAlmostEqual(updated["t_required"], iso_result["tdesign_final_mm"])
-        self.assertAlmostEqual(updated["final_thickness"], 11 * PROWRAP["ply_thickness"])
+        self.assertAlmostEqual(updated["final_thickness"], 19 * PROWRAP["ply_thickness"])
         self.assertAlmostEqual(updated["overlap_length"], iso_result["lover_required_mm"])
         self.assertAlmostEqual(
             updated["iso_length"],
@@ -100,8 +103,8 @@ class TypeAClass3AdapterTest(unittest.TestCase):
             + 2 * iso_result["lover_required_mm"]
             + 2 * iso_result["taper_length_mm"],
         )
-        self.assertEqual(updated["num_bands"], 3)
-        self.assertEqual(updated["proc_length"], 900)
+        self.assertEqual(updated["num_bands"], 4)
+        self.assertEqual(updated["proc_length"], 1200)
 
     def test_external_non_leak_crack_uses_effective_pipe_capacity_as_substrate_credit(self):
         repair = calculate_repair(
@@ -134,7 +137,8 @@ class TypeAClass3AdapterTest(unittest.TestCase):
         updated = apply_type_a_class3_result_to_repair(repair, iso_result)
 
         self.assertAlmostEqual(credit_bar, repair["p_steel_capacity"] * 10.0)
-        self.assertGreaterEqual(credit_bar, 50.0)
+        # B31G Modified P_S = 9.95 MPa -> 99.5 bar substrate credit.
+        self.assertAlmostEqual(credit_bar, 99.51873620726573)
         self.assertEqual(iso_result["layer_count"], 9)
         self.assertEqual(updated["num_plies"], 3)
         self.assertFalse(updated["iso_typea_class3_controls"])

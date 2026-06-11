@@ -32,7 +32,8 @@ class CurrentCalculationBaselineTest(unittest.TestCase):
         self.assertEqual(result["calc_method_thick"], "Type A (Load Sharing)")
         self.assertEqual(result["calc_method_overlap"], "Type A (Geometry Controlled)")
         self.assertAlmostEqual(result["pressure_mpa"], 5.0)
-        self.assertAlmostEqual(result["p_steel_capacity"], 5.088188976377953)
+        # Substrate MAWP from ASME B31G-2023 Level 1 (Modified), SF = 1/0.72.
+        self.assertAlmostEqual(result["p_steel_capacity"], 9.951873620726573)
         self.assertAlmostEqual(result["p_composite_design"], 0.0)
         self.assertAlmostEqual(result["t_required"], 0.0)
         # ISO 7.5.14 minimum thickness: greater of 2 layers or 2 mm -> 3 plies.
@@ -68,7 +69,7 @@ class CurrentCalculationBaselineTest(unittest.TestCase):
 
         self.assertAlmostEqual(result["wall_loss_ratio"], 0.7901364113326338)
         self.assertEqual(result["calc_method_thick"], "Type A (Load Sharing)")
-        self.assertAlmostEqual(result["p_steel_capacity"], 2.261417322834646)
+        self.assertAlmostEqual(result["p_steel_capacity"], 7.420923748895157)
 
     def test_remaining_wall_below_one_mm_sets_pipe_capacity_to_zero(self):
         result = calculate_repair(**default_inputs(rem_wall=0.9))

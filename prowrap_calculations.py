@@ -2,6 +2,7 @@
 
 import math
 
+from b31g import assess_b31g
 from iso24817_typea_class3 import TypeAClass3Inputs, calculate_type_a_class3
 from prowrap_materials import PROWRAP
 
@@ -195,17 +196,35 @@ def calculate_repair(
     design_strain = fperf * temp_factor * eps_lt
 
     pressure_mpa = pressure * 0.1
-    allowable_steel_stress = yield_strength * design_factor
-    theoretical_capacity = (2 * allowable_steel_stress * rem_wall) / od
 
+    # Substrate MAWP (p_s) from an ASME B31G-2023 Level 1 (Modified)
+    # defect assessment, as ISO 24817 requires - replaces the previous
+    # Barlow estimate on the remaining wall.
+    b31g_details = None
     if (
         defect_type in ["Leak", "Crack"]
         or defect_loc == "Internal"
         or has_no_substrate_capacity
     ):
+        # Cracks/leaks are crack-like (outside B31G scope); internal
+        # corrosion is conservatively given no substrate credit here.
         p_steel_capacity = 0.0
     else:
-        p_steel_capacity = theoretical_capacity
+        b31g_details = assess_b31g(
+            od_mm=od,
+            wall_mm=wall,
+            depth_mm=wall - rem_wall,
+            length_mm=length,
+            smys_mpa=yield_strength,
+            safety_factor=max(1.0 / design_factor, 1.25),
+            method="modified",
+            operating_pressure_mpa=pressure_mpa,
+        )
+        if b31g_details["applicable"]:
+            p_steel_capacity = b31g_details["p_s_mpa"]
+        else:
+            # d/t > 0.80: beyond B31G - no Level 1 substrate credit.
+            p_steel_capacity = 0.0
 
     if "Type A" in calc_method_thick and p_steel_capacity > 0:
         p_composite_design = max(0, pressure_mpa - p_steel_capacity)
@@ -337,11 +356,23 @@ def calculate_repair(
                 "The Type B result is outside the validated range - an "
                 "engineered assessment is required."
             )
-    if p_steel_capacity > 0:
+    if b31g_details is not None:
+        compliance_warnings.extend(
+            f"B31G: {w}" for w in b31g_details["warnings"]
+        )
+        if b31g_details["applicable"] and not b31g_details["acceptable"]:
+            compliance_warnings.append(
+                "B31G Level 1: the corroded pipe alone is NOT acceptable at "
+                "the design pressure "
+                f"(safe pressure P_S = {b31g_details['p_s_mpa']:.2f} MPa < "
+                f"{pressure_mpa:.2f} MPa) - the composite repair is "
+                "structural, not just preventive."
+            )
         compliance_warnings.append(
-            "Substrate pressure capacity is estimated by Barlow on the "
-            "remaining wall. ISO 24817 requires the substrate MAWP (p_s) "
-            "from a defect assessment (ASME B31G / API 579 / BS 7910)."
+            "B31G assessment uses the CURRENT remaining wall. ISO 24817 "
+            "requires the defect size projected to the END of the repair "
+            "design life - apply a corrosion growth allowance to the "
+            "remaining wall input if the defect is active."
         )
     thickness_check_ok = final_thickness < od / 12.0
     if not thickness_check_ok:
@@ -387,6 +418,7 @@ def calculate_repair(
         "eps_lt": eps_lt,
         "fperf": fperf,
         "type_b_details": type_b_details,
+        "b31g_details": b31g_details,
         "thickness_check_ok": thickness_check_ok,
         "compliance_warnings": compliance_warnings,
         "num_bands": num_bands,

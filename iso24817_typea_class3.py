@@ -128,6 +128,17 @@ def solve_formula5_thickness(
     remaining_wall_mm: float,
     allowable_circ_strain: float,
 ) -> float:
+    # If the substrate allowable pressure covers the equivalent loads, the
+    # laminate strain is non-positive for any thickness: the remaining wall
+    # is circumferentially sufficient and no thickness is required (the
+    # axial check and minimum-thickness floors still apply).
+    driving_load = (
+        equivalent_pressure_mpa * outside_diameter_mm / 2.0
+        + poisson_ratio * equivalent_axial_load_n / (math.pi * outside_diameter_mm)
+    )
+    if driving_load <= substrate_allowable_pressure_mpa * outside_diameter_mm / 2.0:
+        return 0.0
+
     lower = 0.000001
     upper = max(outside_diameter_mm / 12.0, 50.0)
 

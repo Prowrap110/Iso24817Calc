@@ -82,7 +82,7 @@ def create_pdf(report_data):
     # Add the basis note to the PDF directly under the design section.
     pdf.set_font("Arial", 'I', 9)
     pdf.set_text_color(100, 100, 100) # Dark grey for note
-    pdf.multi_cell(0, 5, txt=safe_text(f"* Thickness per ISO 24817 Formula 11 performance route (eps_lt = 0.55%, Class 3, {report_data['design_life']} yr design life); axial extent per Formulae 18/20/21; minimum thickness per 7.5.14. Substrate capacity is a Barlow estimate - ISO 24817 requires MAWP from a defect assessment (ASME B31G / API 579). Verify against a licensed copy of the standard before use."))
+    pdf.multi_cell(0, 5, txt=safe_text(f"* Thickness per ISO 24817 Formula 11 performance route (eps_lt = 0.55%, Class 3, {report_data['design_life']} yr design life); axial extent per Formulae 18/20/21; minimum thickness per 7.5.14. Substrate MAWP (p_s) per ASME B31G-2023 Level 1 (Modified) at current remaining wall. Verify against licensed copies of both standards before use."))
     pdf.set_text_color(0, 0, 0) # Reset to black
     pdf.ln(2)
     for warning_text in report_data.get("compliance_warnings", []):
@@ -252,7 +252,13 @@ def run_calculation(
             st.markdown("### Defect Analysis")
             st.write(f"**Mechanism:** {defect_type}")
             st.write(f"**Wall Loss:** {wall_loss_ratio*100:.1f}%")
-            st.write(f"**Effective Pipe Capacity:** {p_steel_capacity:.2f} MPa")
+            b31g = report_data.get("b31g_details")
+            if b31g:
+                st.write(f"**Substrate MAWP p_s (ASME B31G {b31g['method'].title()}, SF={b31g['safety_factor']:.2f}):** {p_steel_capacity:.2f} MPa")
+                st.write(f"**B31G:** d/t={b31g['d_over_t']:.3f}, z={b31g['z']:.2f}, M={b31g['folias_m']:.3f}, S_F={b31g['s_f_mpa']:.0f} MPa, P_F={b31g['p_f_mpa']:.2f} MPa")
+                st.write(f"**B31G Acceptance (pipe alone):** {'ACCEPTABLE' if b31g.get('acceptable') else 'NOT ACCEPTABLE'} at design pressure")
+            else:
+                st.write(f"**Effective Pipe Capacity:** {p_steel_capacity:.2f} MPa (no substrate credit for this defect type)")
         with c2:
             st.markdown("### Structural Design")
             st.write(f"**Composite Design Pressure:** {p_composite_design:.2f} MPa")
