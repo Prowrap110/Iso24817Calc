@@ -1,6 +1,6 @@
 """PROWRAP PRW110 material properties.
 
-Source: PRW110 Test Data.pdf, ISO TS 24817 and ASME PCC-2 PROWRAP HPTP
+Source: PRW110 Test Data.pdf, ISO 24817:2017 and ASME PCC-2 PROWRAP HPTP
 repair system qualification data.
 """
 
@@ -44,7 +44,7 @@ PROWRAP = {
 PROWRAP_SOURCES = {
     "source_document": "PRW110 Test Data.pdf",
     "qualification_basis": (
-        "ISO TS 24817 and ASME PCC-2 - PROWRAP HPTP repair system "
+        "ISO 24817:2017 and ASME PCC-2 - PROWRAP HPTP repair system "
         "qualification data"
     ),
 }
