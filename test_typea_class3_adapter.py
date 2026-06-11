@@ -148,13 +148,9 @@ class TypeAClass3AdapterTest(unittest.TestCase):
             credit_bar,
         )
 
-    def test_leak_crack_and_internal_do_not_get_substrate_credit(self):
-        for defect_type, defect_loc in [
-            ("Leak", "External"),
-            ("Crack", "External"),
-            ("Corrosion", "Internal"),
-        ]:
-            with self.subTest(defect_type=defect_type, defect_loc=defect_loc):
+    def test_leak_and_crack_do_not_get_substrate_credit(self):
+        for defect_type in ["Leak", "Crack"]:
+            with self.subTest(defect_type=defect_type):
                 repair = calculate_repair(
                     customer="PROTAP",
                     location="Turkey",
@@ -164,7 +160,7 @@ class TypeAClass3AdapterTest(unittest.TestCase):
                     pressure=50.0,
                     temp=40.0,
                     defect_type=defect_type,
-                    defect_loc=defect_loc,
+                    defect_loc="External",
                     length=100.0,
                     rem_wall=4.5,
                     yield_strength=359.0,
@@ -173,6 +169,37 @@ class TypeAClass3AdapterTest(unittest.TestCase):
                 )
 
                 self.assertEqual(substrate_credit_bar_for_iso_check(repair), 0.0)
+
+    def test_internal_corrosion_projected_to_end_of_life(self):
+        base = dict(
+            customer="PROTAP", location="Turkey", report_no="24-152",
+            od=457.2, wall=9.53, pressure=50.0, temp=40.0,
+            defect_type="Corrosion", defect_loc="Internal", length=100.0,
+            rem_wall=4.5, yield_strength=359.0, design_factor=0.72,
+            design_life=20,
+        )
+        # Stays above 1 mm at end of life -> Type A with B31G credit at the
+        # projected (deeper) defect.
+        r = calculate_repair(**base, internal_corrosion_rate=0.1)
+        self.assertAlmostEqual(r["rem_wall_eol"], 2.5)
+        self.assertEqual(r["calc_method_thick"], "Type A (Load Sharing)")
+        self.assertGreater(r["p_steel_capacity"], 0.0)
+        self.assertLess(
+            r["p_steel_capacity"], 9.951873620726573
+        )  # less credit than the external case at current wall
+
+        # Projected below 1 mm -> Type B, no substrate credit.
+        r2 = calculate_repair(**base, internal_corrosion_rate=0.2)
+        self.assertAlmostEqual(r2["rem_wall_eol"], 0.5)
+        self.assertEqual(r2["calc_method_thick"], "Type B (Total Replacement)")
+        self.assertEqual(substrate_credit_bar_for_iso_check(r2), 0.0)
+
+        # Rate 0 on an internal defect must raise a warning prompting for
+        # a corrosion rate.
+        r3 = calculate_repair(**base)
+        self.assertTrue(
+            any("corrosion rate = 0" in w for w in r3["compliance_warnings"])
+        )
 
 
 if __name__ == "__main__":

@@ -149,8 +149,14 @@ def calculate_repair(
     design_factor,
     design_life,
     force_3_layers=False,
+    internal_corrosion_rate=0.0,
 ):
-    """Calculate repair outputs using the current legacy Streamlit formulas."""
+    """Calculate repair outputs using the current legacy Streamlit formulas.
+
+    internal_corrosion_rate (mm/yr): post-repair growth of INTERNAL
+    corrosion, used to project the remaining wall to end of design life.
+    External Type A defects are sealed by the repair (rate = 0).
+    """
     _validate_inputs(
         od,
         wall,
@@ -162,15 +168,25 @@ def calculate_repair(
         design_factor,
         design_life,
     )
+    if internal_corrosion_rate < 0:
+        raise ValueError("Internal corrosion rate cannot be negative.")
 
     wall_loss_ratio = (wall - rem_wall) / wall
-    has_no_substrate_capacity = rem_wall < 1.0
+
+    # Remaining wall projected to END of repair design life (ISO 24817 7.3):
+    # external corrosion is sealed by the repair (rate 0); internal
+    # corrosion keeps growing under the laminate at the given rate.
+    if defect_type == "Corrosion" and defect_loc == "Internal":
+        rem_wall_eol = max(rem_wall - internal_corrosion_rate * design_life, 0.0)
+    else:
+        rem_wall_eol = rem_wall
+    has_no_substrate_capacity = rem_wall_eol < 1.0
 
     calc_method_thick = "Type B (Total Replacement)"
     calc_method_overlap = "Type B (Shear Controlled)"
 
     if defect_type == "Corrosion":
-        if defect_loc == "External" and not has_no_substrate_capacity:
+        if not has_no_substrate_capacity:
             calc_method_thick = "Type A (Load Sharing)"
             calc_method_overlap = "Type A (Geometry Controlled)"
         else:
@@ -203,17 +219,20 @@ def calculate_repair(
     b31g_details = None
     if (
         defect_type in ["Leak", "Crack"]
-        or defect_loc == "Internal"
+        or defect_type == "Dent"
         or has_no_substrate_capacity
     ):
-        # Cracks/leaks are crack-like (outside B31G scope); internal
-        # corrosion is conservatively given no substrate credit here.
+        # Cracks/leaks are crack-like (outside B31G scope); dents are not
+        # blunt metal loss; < 1 mm projected wall gets no credit.
         p_steel_capacity = 0.0
     else:
+        # B31G covers internal and external blunt metal loss. The depth is
+        # taken at END of design life (internal corrosion projected at the
+        # given rate; external sealed by the repair).
         b31g_details = assess_b31g(
             od_mm=od,
             wall_mm=wall,
-            depth_mm=wall - rem_wall,
+            depth_mm=wall - rem_wall_eol,
             length_mm=length,
             smys_mpa=yield_strength,
             safety_factor=max(1.0 / design_factor, 1.25),
@@ -368,12 +387,25 @@ def calculate_repair(
                 f"{pressure_mpa:.2f} MPa) - the composite repair is "
                 "structural, not just preventive."
             )
-        # End-of-life defect size: for Type A external corrosion the
-        # composite repair seals the defect from the corrosive environment,
-        # so the post-repair corrosion rate is taken as zero and the
-        # current remaining wall equals the end-of-life remaining wall.
-        # (Internal corrosion gets no substrate credit and is treated as
-        # Type B above, so no growth projection is needed there either.)
+        # End-of-life defect size: external Type A corrosion is sealed by
+        # the repair (post-repair rate 0, current wall = end-of-life wall);
+        # internal corrosion is projected forward at internal_corrosion_rate.
+    if defect_type == "Corrosion" and defect_loc == "Internal":
+        if internal_corrosion_rate > 0:
+            compliance_warnings.append(
+                "Internal corrosion projected at "
+                f"{internal_corrosion_rate:.2f} mm/yr: remaining wall "
+                f"{rem_wall:.2f} mm now -> {rem_wall_eol:.2f} mm at end of "
+                f"the {design_life:.0f}-year design life. Assessment and "
+                "classification use the end-of-life wall."
+            )
+        else:
+            compliance_warnings.append(
+                "Internal corrosion with corrosion rate = 0 mm/yr: the "
+                "defect remains exposed to the process fluid under the "
+                "repair. Enter a corrosion rate so the remaining wall can "
+                "be projected to the end of the design life (ISO 24817 7.3)."
+            )
     thickness_check_ok = final_thickness < od / 12.0
     if not thickness_check_ok:
         compliance_warnings.append(
@@ -393,6 +425,8 @@ def calculate_repair(
         "defect_type": defect_type,
         "defect_loc": defect_loc,
         "rem_wall": rem_wall,
+        "rem_wall_eol": rem_wall_eol,
+        "internal_corrosion_rate": internal_corrosion_rate,
         "length": length,
         "wall_loss_ratio": wall_loss_ratio,
         "has_no_substrate_capacity": has_no_substrate_capacity,
@@ -497,9 +531,12 @@ calculate_type_a_class3_fallback_check = calculate_type_a_class3_prowrap_check
 
 
 def substrate_credit_bar_for_iso_check(repair_data):
-    """Return the substrate pressure credit for ISO checks in bar."""
-    if repair_data["defect_loc"] != "External":
-        return 0.0
+    """Return the substrate pressure credit for ISO checks in bar.
+
+    p_steel_capacity already encodes the B31G scope rules (no credit for
+    cracks/leaks/dents or < 1 mm end-of-life wall; internal corrosion
+    assessed at the projected end-of-life wall).
+    """
     if repair_data["defect_type"] in {"Crack", "Leak"}:
         return 0.0
     return max(0.0, repair_data["p_steel_capacity"] * 10.0)

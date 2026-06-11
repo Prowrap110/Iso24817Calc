@@ -66,6 +66,9 @@ def create_pdf(report_data):
         "Defect Mechanism": report_data['defect_type'],
         "Defect Location": report_data['defect_loc'],
         "Remaining Wall": f"{report_data['rem_wall']} mm",
+        "Remaining Wall @ End of Life": f"{report_data['rem_wall_eol']:.2f} mm"
+        + (f" (internal corrosion {report_data['internal_corrosion_rate']:.2f} mm/yr)"
+           if report_data['internal_corrosion_rate'] > 0 else ""),
         "Axial Length": f"{report_data['length']} mm",
         "Wall Loss": f"{report_data['wall_loss_ratio']*100:.1f} %",
         "Repair Logic": report_data['calc_method_thick']
@@ -146,6 +149,7 @@ def run_calculation(
     installation_temp=20.0,
     component_type="Straight",
     cyclic_derating_factor=1.0,
+    internal_corrosion_rate=0.0,
 ):
     try:
         report_data = calculate_repair(
@@ -164,6 +168,7 @@ def run_calculation(
             design_factor,
             design_life,
             force_3_layers=st.session_state.force_3_layers,
+            internal_corrosion_rate=internal_corrosion_rate,
         )
     except ValueError as exc:
         for err in str(exc).splitlines():
@@ -187,13 +192,13 @@ def run_calculation(
     typea_class3_note = None
 
     if show_typea_class3_check:
-        if defect_loc == "External" and defect_type not in ["Crack", "Leak"]:
+        if defect_type not in ["Crack", "Leak"] and "Type A" in report_data["calc_method_thick"]:
             try:
                 typea_class3_result = calculate_type_a_class3_prowrap_check(
                     od=od,
                     pressure_bar=pressure,
                     temp=temp,
-                    rem_wall=rem_wall,
+                    rem_wall=report_data["rem_wall_eol"],
                     design_life=design_life,
                     nominal_wall_mm=wall,
                     substrate_allowable_pressure_bar=substrate_allowable_pressure,
@@ -205,7 +210,8 @@ def run_calculation(
                 typea_class3_note = str(exc)
         else:
             typea_class3_note = (
-                "Type A / Class 3 check requires an external non-crack/non-leak defect in this version."
+                "Type A / Class 3 check requires a Type A (non-crack/non-leak, "
+                "not through-wall within design life) defect."
             )
 
     if typea_class3_result:
@@ -412,6 +418,12 @@ def main():
         loc_ = st.sidebar.selectbox("Location", ["External", "Internal"], on_change=reset_calc)
         len_ = st.sidebar.number_input("Defect Length [mm]", value=100.0, on_change=reset_calc)
         rem_ = st.sidebar.number_input("Remaining Wall [mm]", value=4.5, on_change=reset_calc)
+        corr_rate = 0.0
+        if loc_ == "Internal" and type_ == "Corrosion":
+            corr_rate = st.sidebar.number_input(
+                "Internal Corrosion Rate [mm/yr]", value=0.0, min_value=0.0,
+                step=0.05, on_change=reset_calc,
+                help="Post-repair growth of internal corrosion; used to project the remaining wall to end of design life. External defects are sealed by the repair (rate 0).")
         
         st.sidebar.header("5. Safety & Design Settings")
         design_life = st.sidebar.number_input("Design Life [years]", value=20, min_value=1, on_change=reset_calc)
@@ -448,6 +460,7 @@ def main():
                 installation_temp,
                 component_type,
                 cyclic_derating_factor,
+                corr_rate,
             )
             
     except Exception as e:
