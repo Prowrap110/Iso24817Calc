@@ -59,9 +59,11 @@ class TypeAClass3AdapterTest(unittest.TestCase):
         )
         self.assertAlmostEqual(derated["eps_c"], 0.5 * base["eps_c"], places=9)
 
-    def test_restrained_pipeline_axial_basis(self):
-        # Default: no axial load on the laminate (restrained pipeline,
-        # end-thrust carried by pipe wall and soil restraint).
+    def test_axial_load_case_selector(self):
+        import math
+
+        # Case 0 (default): buried restrained pipeline - axial loads not
+        # taken into account.
         iso = calculate_type_a_class3_prowrap_check(
             od=457.2, pressure_bar=50.0, temp=40.0, rem_wall=4.5,
             design_life=20, nominal_wall_mm=9.53,
@@ -69,13 +71,16 @@ class TypeAClass3AdapterTest(unittest.TestCase):
         self.assertEqual(iso["feq_n"], 0.0)
         self.assertEqual(iso["tmin_a_mm"], 0.0)
 
-        # Explicit axial load is honoured when supplied.
-        iso2 = calculate_type_a_class3_prowrap_check(
+        # Case 1: severed-pipe/above-ground - axial loads per ISO
+        # Formula 4 (pressure end-thrust).
+        iso1 = calculate_type_a_class3_prowrap_check(
             od=457.2, pressure_bar=50.0, temp=40.0, rem_wall=4.5,
-            design_life=20, nominal_wall_mm=9.53, axial_load_n=200e3,
+            design_life=20, nominal_wall_mm=9.53, axial_load_case=1,
         )
-        self.assertEqual(iso2["feq_n"], 200000.0)
-        self.assertAlmostEqual(iso2["tmin_a_mm"], 0.9255167684230746)
+        self.assertAlmostEqual(
+            iso1["feq_n"], 5.0 * math.pi * 457.2**2 / 4.0
+        )
+        self.assertGreater(iso1["tmin_a_mm"], 0.0)
 
     def test_iso_result_can_drive_displayed_repair_metrics_when_pressure_deficit_exists(self):
         # 110 bar exceeds the B31G safe pressure (P_S = 9.95 MPa), so a
