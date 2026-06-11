@@ -368,12 +368,12 @@ def calculate_repair(
                 f"{pressure_mpa:.2f} MPa) - the composite repair is "
                 "structural, not just preventive."
             )
-        compliance_warnings.append(
-            "B31G assessment uses the CURRENT remaining wall. ISO 24817 "
-            "requires the defect size projected to the END of the repair "
-            "design life - apply a corrosion growth allowance to the "
-            "remaining wall input if the defect is active."
-        )
+        # End-of-life defect size: for Type A external corrosion the
+        # composite repair seals the defect from the corrosive environment,
+        # so the post-repair corrosion rate is taken as zero and the
+        # current remaining wall equals the end-of-life remaining wall.
+        # (Internal corrosion gets no substrate credit and is treated as
+        # Type B above, so no growth projection is needed there either.)
     thickness_check_ok = final_thickness < od / 12.0
     if not thickness_check_ok:
         compliance_warnings.append(
