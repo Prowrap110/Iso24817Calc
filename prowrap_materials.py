@@ -16,7 +16,8 @@ PROWRAP = {
     "compressive_modulus": 3310,       # MPa, ISO 604
     "compressive_strength": 85.58,     # MPa, ISO 604
     "shear_modulus": 2450,             # MPa, ASTM D5379
-    "shore_d": 79.1,                   # Shore D, ISO 868
+    "shore_d": 79.1,                   # Shore D, measured, ISO 868
+    "shore_d_min": 75,                 # Shore D, minimum acceptance for QC
     "glass_transition_temp": 78.18,    # degC, mid Tg, ISO 11357-2
     "peak_exotherm_temp": 104,         # degC, ISO 11357-2
     "thermal_expansion_circ": 10.34,   # ppm/K, circumferential, ASTM E831

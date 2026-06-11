@@ -111,7 +111,7 @@ def create_pdf(report_data):
         "2. Primer/Filler: Apply Prowrap Filler to defect area to restore OD.",
         f"3. Lamination: Saturate Carbon Cloth. Apply {report_data['num_plies']} layers per band.",
         f"4. Wrapping: Use {report_data['num_bands']} band(s) of 300mm cloth.",
-        f"5. Quality Control: Minimum average Shore D hardness of {PROWRAP['shore_d']} required."
+        f"5. Quality Control: Minimum average Shore D hardness of {PROWRAP['shore_d_min']} required."
     ]
     
     for step in steps:
@@ -375,7 +375,7 @@ def run_calculation(
         2. **Primer/Filler:** Apply Prowrap Filler to defect area to restore OD.
         3. **Lamination:** Saturate Carbon Cloth. Apply **{num_plies} layers** per band.
         4. **Wrapping:** Use **{num_bands} band(s)** of 300mm cloth.
-        5. **Quality Control:** Minimum average Shore D hardness of **{PROWRAP['shore_d']}** required.
+        5. **Quality Control:** Minimum average Shore D hardness of **{PROWRAP['shore_d_min']}** required.
         """)
 
     # --- J. PDF DOWNLOAD GENERATOR WITH ERROR CATCHING ---

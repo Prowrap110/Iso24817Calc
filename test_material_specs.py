@@ -68,6 +68,7 @@ class ProwrapMaterialSpecsTest(unittest.TestCase):
             "gamma_lcl",
             "type_b_min_layers",
             "type_b_max_life_years",
+            "shore_d_min",
             "impact_peak_energy",
             "short_term_survival",
             "max_temp",
