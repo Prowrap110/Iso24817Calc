@@ -170,10 +170,6 @@ def run_calculation(
             design_life,
             force_3_layers=st.session_state.force_3_layers,
             internal_corrosion_rate=internal_corrosion_rate,
-            installation_temp=installation_temp,
-            component_type=component_type,
-            cyclic_derating_factor=cyclic_derating_factor,
-            axial_load_case=axial_load_case,
         )
     except ValueError as exc:
         for err in str(exc).splitlines():
@@ -274,13 +270,7 @@ def run_calculation(
         with c2:
             st.markdown("### Structural Design")
             st.write(f"**Composite Design Pressure:** {p_composite_design:.2f} MPa")
-            st.write(f"**Design Strain Limit (circ.):** {design_strain*100:.3f}% (ISO 24817 Formula 11 x cyclic factor)")
-            st.write(f"**Allowable Axial Strain:** {report_data['eps_a']*100:.3f}% (Table 9, Formula 10 thermal mismatch, cyclic factor)")
-            st.write(f"**Component Factor f_th:** {report_data['fth_stress']:.2f} ({report_data['component_type']})")
-            if report_data["axial_load_case"] == 1:
-                st.write(f"**Axial End-Thrust F_eq (Formula 4):** {report_data['feq_n']/1000:.0f} kN")
-            else:
-                st.write("**Axial Loads:** not applied (buried restrained pipeline)")
+            st.write(f"**Design Strain Limit:** {design_strain*100:.3f}% (ISO 24817 Formula 11: fperf x fT2 x eps_lt)")
             type_b_details = report_data.get("type_b_details")
             if type_b_details:
                 st.markdown("### Type B Check (ISO Formula 12)")
@@ -446,17 +436,17 @@ def main():
         st.sidebar.header("5. Safety & Design Settings")
         design_life = st.sidebar.number_input("Design Life [years]", value=20, min_value=1, on_change=reset_calc)
         df = st.sidebar.number_input("Design Factor (f)", value=0.72, min_value=0.1, max_value=1.0, on_change=reset_calc)
+
+        st.sidebar.header("6. ISO Type A / Class 3 Check")
+        show_typea_class3_check = st.sidebar.checkbox("Show Type A / Class 3 check", value=True, on_change=reset_calc)
+        st.sidebar.caption("For external non-crack/non-leak defects, substrate credit is automatically taken from effective pipe capacity.")
         installation_temp = st.sidebar.number_input("Installation temperature [°C]", value=20.0, on_change=reset_calc)
         component_type = st.sidebar.selectbox("Component type", ["Straight", "Bend", "Tee", "Flange", "Reducer"], on_change=reset_calc)
         cyclic_derating_factor = st.sidebar.number_input("Cyclic derating factor", value=1.0, min_value=0.01, max_value=1.0, on_change=reset_calc)
         axial_load_case = st.sidebar.selectbox(
             "Axial load case", [0, 1], on_change=reset_calc,
             help="1 = severed-pipe/guillotine load credible, or above-ground pipeline near bends/closures: axial loads calculated per ISO Formula 4. 0 = buried restrained pipeline: axial loads not taken into account.")
-
-        st.sidebar.header("6. ISO Type A / Class 3 Check")
-        show_typea_class3_check = st.sidebar.checkbox("Show Type A / Class 3 check", value=True, on_change=reset_calc)
-        st.sidebar.caption("Cross-check of the baseline against the rigorous ISO Type A / Class 3 module. For external non-crack/non-leak defects, substrate credit is automatically taken from effective pipe capacity.")
-
+        
         if st.sidebar.button("Calculate & Optimize", type="primary"):
             st.session_state.calc_active = True
             st.session_state.force_3_layers = False

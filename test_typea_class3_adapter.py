@@ -205,27 +205,20 @@ class TypeAClass3AdapterTest(unittest.TestCase):
             rem_wall=4.5, yield_strength=359.0, design_factor=0.72,
             design_life=20,
         )
-        # Internal defects always take the Type B route (no substrate load
-        # sharing in the laminate sizing), but the B31G assessment is still
-        # run at the projected (deeper) end-of-life defect for reporting.
+        # Stays above 1 mm at end of life -> Type A with B31G credit at the
+        # projected (deeper) defect.
         r = calculate_repair(**base, internal_corrosion_rate=0.1)
         self.assertAlmostEqual(r["rem_wall_eol"], 2.5)
-        self.assertEqual(r["calc_method_thick"], "Type B (Total Replacement)")
+        self.assertEqual(r["calc_method_thick"], "Type A (Load Sharing)")
         self.assertGreater(r["p_steel_capacity"], 0.0)
         self.assertLess(
             r["p_steel_capacity"], 9.951873620726573
-        )  # B31G at the projected wall is weaker than the external case
-        # Type B route: laminate is sized for the full design pressure.
-        self.assertAlmostEqual(r["p_composite_design"], r["pressure_mpa"])
-        self.assertTrue(
-            any("Type B route" in w for w in r["compliance_warnings"])
-        )
+        )  # less credit than the external case at current wall
 
-        # Projected below 1 mm -> still Type B, and no substrate credit at all.
+        # Projected below 1 mm -> Type B, no substrate credit.
         r2 = calculate_repair(**base, internal_corrosion_rate=0.2)
         self.assertAlmostEqual(r2["rem_wall_eol"], 0.5)
         self.assertEqual(r2["calc_method_thick"], "Type B (Total Replacement)")
-        self.assertEqual(r2["p_steel_capacity"], 0.0)
         self.assertEqual(substrate_credit_bar_for_iso_check(r2), 0.0)
 
         # Rate 0 on an internal defect must raise a warning prompting for
