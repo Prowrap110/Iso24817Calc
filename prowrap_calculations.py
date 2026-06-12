@@ -3,8 +3,17 @@
 import math
 
 from b31g import assess_b31g
-from iso24817_typea_class3 import TypeAClass3Inputs, calculate_type_a_class3
+from iso24817_typea_class3 import (
+    TypeAClass3Inputs,
+    calculate_type_a_class3,
+    component_factor,
+)
 from prowrap_materials import PROWRAP
+
+# Substrate (carbon steel) coefficient of thermal expansion used for the
+# Formula (10) thermal-mismatch term. Matches the TypeAClass3Inputs default
+# so the baseline and the rigorous module share the same basis.
+SUBSTRATE_CTE_PER_C = 12e-6
 
 
 def _validate_inputs(
@@ -150,8 +159,24 @@ def calculate_repair(
     design_life,
     force_3_layers=False,
     internal_corrosion_rate=0.0,
+    installation_temp=20.0,
+    component_type="Straight",
+    cyclic_derating_factor=1.0,
+    axial_load_case=0,
 ):
-    """Calculate repair outputs using the current legacy Streamlit formulas.
+    """Calculate repair outputs (baseline route).
+
+    Routing rule:
+      - External + (Corrosion or Dent) -> Type A route, UNLESS the remaining
+        wall at end of design life is < 1 mm (ISO 24817 7.5.7: defects that
+        become through-wall within the repair lifetime are Type B).
+      - Internal (any mechanism), Crack or Leak -> Type B route.
+
+    Type A thickness/overlap mirror the rigorous ISO Type A / Class 3 module
+    (Formula 5 with substrate credit, Formula 4 end-thrust when
+    axial_load_case == 1, Formula 10 thermal-mismatch on the axial strain,
+    Formula 25 cyclic derating, Table 11/12 component factor f_th, Formula 33
+    tee cap).
 
     internal_corrosion_rate (mm/yr): post-repair growth of INTERNAL
     corrosion, used to project the remaining wall to end of design life.
@@ -170,6 +195,11 @@ def calculate_repair(
     )
     if internal_corrosion_rate < 0:
         raise ValueError("Internal corrosion rate cannot be negative.")
+    if cyclic_derating_factor <= 0 or cyclic_derating_factor > 1.0:
+        raise ValueError("Cyclic derating factor must be in (0, 1].")
+    if axial_load_case not in (0, 1):
+        raise ValueError("Axial load case must be 0 (buried/restrained) or 1 (Formula 4 end-thrust).")
+    fth_stress = component_factor(component_type)  # raises on unknown type
 
     wall_loss_ratio = (wall - rem_wall) / wall
 
@@ -182,36 +212,77 @@ def calculate_repair(
         rem_wall_eol = rem_wall
     has_no_substrate_capacity = rem_wall_eol < 1.0
 
-    calc_method_thick = "Type B (Total Replacement)"
-    calc_method_overlap = "Type B (Shear Controlled)"
-
-    if defect_type == "Corrosion":
-        if not has_no_substrate_capacity:
-            calc_method_thick = "Type A (Load Sharing)"
-            calc_method_overlap = "Type A (Geometry Controlled)"
+    # Routing: External + (Corrosion or Dent) -> Type A; Internal, Crack or
+    # Leak -> Type B. A remaining wall < 1 mm at end of design life forces
+    # Type B regardless (through-wall within repair lifetime, ISO 7.5.7).
+    is_type_a_route = (
+        defect_loc == "External"
+        and defect_type in ("Corrosion", "Dent")
+        and not has_no_substrate_capacity
+    )
+    if is_type_a_route:
+        if defect_type == "Dent":
+            calc_method_thick = "Type A (Dent Reinforcement)"
         else:
-            calc_method_thick = "Type B (Total Replacement)"
-            calc_method_overlap = "Type B (Shear Controlled)"
-    elif defect_type == "Dent":
-        calc_method_thick = "Type A (Dent Reinforcement)"
-        calc_method_overlap = "Type B (Shear Controlled)"
-    elif defect_type in ["Leak", "Crack"]:
+            calc_method_thick = "Type A (Load Sharing)"
+        calc_method_overlap = "Type A (Geometry Controlled)"
+    else:
         calc_method_thick = "Type B (Total Replacement)"
         calc_method_overlap = "Type B (Shear Controlled)"
 
     safety_factor = 1.0 / design_factor
 
-    # ISO 24817 allowable strain, 7.5.6 performance route (Formula 11):
-    # eps_c = fperf * fT2 * eps_lt, with Class 3 design-life-data fperf
-    # (Table 10) and the Table 8 polynomial for fT2 (Ttest == Tamb in the
-    # PRW110 qualification, so the argument reduces to Tm - Td).
+    # ISO 24817 allowable strains, mirroring the rigorous Type A / Class 3
+    # module (iso24817_typea_class3.calculate_type_a_class3):
+    #
+    # Circumferential, 7.5.6 performance route (Formula 11):
+    #   eps_c = f_cyclic * fperf * fT2 * eps_lt
+    # with Class 3 design-life-data fperf (Table 10), the Table 8 polynomial
+    # for fT2 (Ttest == Tamb in the PRW110 qualification, so the argument
+    # reduces to Tm - Td) and Formula 25 cyclic derating.
+    #
+    # Axial, Table 9 route with the Formula 10 thermal-mismatch term
+    # (installation -> design temperature differential against the substrate
+    # CTE) and Formula 25 cyclic derating:
+    #   eps_a = f_cyclic * (fT1 * eps_a0 - |dT * (alpha_s - alpha_a)|)
     eps_lt = PROWRAP.get("long_term_strain_lcl", PROWRAP.get("long_term_strain_20y"))
     fperf = 0.76 * 10 ** (-0.00273 * design_life)
     ft2_delta = PROWRAP["max_temp"] - temp
     temp_factor = 0.0000625 * ft2_delta**2 + 0.00125 * ft2_delta + 0.7
-    design_strain = fperf * temp_factor * eps_lt
+    design_strain = cyclic_derating_factor * fperf * temp_factor * eps_lt
+
+    # Table 9: Ea > 0.5 * Ec for PRW110, so eps_a0 == eps_c0.
+    if PROWRAP["modulus_axial"] > 0.5 * PROWRAP["modulus_circ"]:
+        eps_a0 = 0.003061 * 10 ** (-0.0044 * design_life)
+    else:
+        eps_a0 = 0.001
+    ft1 = temp_factor  # same Table 8 polynomial and same Tm - Td argument
+    delta_t_install = temp - installation_temp
+    axial_cte = PROWRAP["thermal_expansion_axial"] * 1e-6
+    eps_a_noncyclic = ft1 * eps_a0 - abs(
+        delta_t_install * (SUBSTRATE_CTE_PER_C - axial_cte)
+    )
+    eps_a = cyclic_derating_factor * eps_a_noncyclic
+
+    if design_strain <= 0:
+        raise ValueError("Calculated circumferential allowable strain is <= 0.")
+    if eps_a <= 0:
+        raise ValueError(
+            "Calculated axial allowable strain is <= 0 (check installation "
+            "temperature differential and cyclic derating factor)."
+        )
 
     pressure_mpa = pressure * 0.1
+
+    # ISO 24817 Formula (4) equivalent loads: peq is the design pressure;
+    # Feq is the pressure end-thrust pi/4 * p * D^2 when the severed-pipe /
+    # above-ground case applies (axial_load_case == 1), else 0 for a buried
+    # restrained pipeline.
+    peq = pressure_mpa
+    if axial_load_case == 1:
+        feq = peq * math.pi * od**2 / 4.0
+    else:
+        feq = 0.0
 
     # Substrate MAWP (p_s) from an ASME B31G-2023 Level 1 (Modified)
     # defect assessment, as ISO 24817 requires - replaces the previous
@@ -247,15 +318,43 @@ def calculate_repair(
 
     if "Type A" in calc_method_thick and p_steel_capacity > 0:
         p_composite_design = max(0, pressure_mpa - p_steel_capacity)
+        ps_credit = p_steel_capacity
     else:
         p_composite_design = pressure_mpa
+        ps_credit = 0.0
 
-    if p_composite_design > 0:
-        t_required = (
-            p_composite_design * od
-        ) / (2 * PROWRAP["modulus_circ"] * design_strain)
+    # ISO 24817 Formula (5) in closed form (no live pressure):
+    # eps_c = [peq*D/2 + nu*Feq/(pi*D) - ps*D/2] / (Ec*t)
+    # -> tmin_c. Identical to solve_formula5_thickness in the rigorous
+    # module for live_pressure = 0.
+    nu = PROWRAP["poisson_circ"]
+    ec = PROWRAP["modulus_circ"]
+    ea = PROWRAP["modulus_axial"]
+    driving_load = peq * od / 2.0 + nu * feq / (math.pi * od)
+    substrate_relief = ps_credit * od / 2.0
+    if driving_load > substrate_relief:
+        tmin_c = (driving_load - substrate_relief) / (ec * design_strain)
     else:
-        t_required = 0.0
+        tmin_c = 0.0
+
+    # Axial minimum thickness (Formulae 6/8 combination, as in the rigorous
+    # module): t >= [Feq/(pi*D*Ea) - nu*peq*D/(2*Ec)] / eps_a.
+    tmin_a = (
+        feq / (math.pi * od * ea) - peq * od * nu / (2.0 * ec)
+    ) / eps_a
+    if tmin_a < 0:
+        tmin_a = 0.0
+
+    tdesign_base = max(tmin_c, tmin_a)
+    # Component stress concentration factor f_th (Bend 1.2, Tee 2.0,
+    # Flange/Reducer 1.1, Straight 1.0).
+    t_required = tdesign_base * fth_stress
+
+    # Tee/nozzle pressure cap, Formula (33), branch diameter Db = D
+    # (conservative default, as in the rigorous module).
+    if (component_type or "").strip().upper() == "TEE":
+        t_required_tee = peq * (od + od) / (2.0 * ec * design_strain)
+        t_required = max(t_required, t_required_tee)
 
     # Type B (through-wall) designs must satisfy BOTH the Formula (12)
     # energy-release-rate equation and the Type A equations (7.5.7):
@@ -300,13 +399,20 @@ def calculate_repair(
     # Formula (18) geometric overlap 2*sqrt(D*t), never less than 50 mm,
     # plus the Formula (21) load-transfer check 3*Ea*eps_a*t/tau.
     overlap_geometric = 2.0 * math.sqrt(od * wall)
-    overlap_transfer = (
-        3.0 * PROWRAP["modulus_axial"] * design_strain * final_thickness
-    ) / PROWRAP["long_term_lap_shear"]
+    # Formula (21) axial load-transfer length, 3*Ea*eps_a*t/tau. For the
+    # Type A route this uses tdesign_base (pre-f_th design thickness), as in
+    # the rigorous module; for Type B the installed thickness is used
+    # (conservative).
     if "Type A" in calc_method_overlap:
+        overlap_transfer = (
+            3.0 * ea * eps_a * tdesign_base
+        ) / PROWRAP["long_term_lap_shear"]
         overlap_shear_basis = "iso_formula_18_and_21"
         overlap_shear_strength = PROWRAP["long_term_lap_shear"]
     else:
+        overlap_transfer = (
+            3.0 * ea * eps_a * final_thickness
+        ) / PROWRAP["long_term_lap_shear"]
         overlap_shear_basis = "iso_formula_18_and_21_type_b"
         overlap_shear_strength = PROWRAP["long_term_lap_shear"]
     overlap_length = max(50.0, overlap_geometric, overlap_transfer)
@@ -315,12 +421,17 @@ def calculate_repair(
     taper_length = 5.0 * final_thickness
     total_repair_length_calc = length + (2 * overlap_length) + (2 * taper_length)
 
+    # Band count from PROWRAP cloth constants (same formula as the rigorous
+    # path: effective step = cloth width - stitching overlap).
     if total_repair_length_calc <= PROWRAP["cloth_width_mm"]:
         num_bands = 1
-        procurement_axial_length = 300
+        procurement_axial_length = PROWRAP["cloth_width_mm"]
     else:
-        num_bands = math.ceil((total_repair_length_calc - 300) / 250) + 1
-        procurement_axial_length = num_bands * 300
+        num_bands = math.ceil(
+            (total_repair_length_calc - PROWRAP["cloth_width_mm"])
+            / (PROWRAP["cloth_width_mm"] - PROWRAP["stitching_overlap_mm"])
+        ) + 1
+        procurement_axial_length = num_bands * PROWRAP["cloth_width_mm"]
 
     circumference_m = (math.pi * od) / 1000
     axial_procurement_m = procurement_axial_length / 1000
@@ -359,7 +470,7 @@ def calculate_repair(
                 "(Tg - 30 for Class 3 Type B repairs over 2 years). "
                 "This repair is outside the qualified temperature range."
             )
-    if "Type B" in calc_method_thick:
+    if "Type B" in calc_method_thick and type_b_details is not None:
         compliance_warnings.append(
             "Type B design assumes a circular/near-circular defect of size "
             f"{type_b_details['defect_size_used_mm']:.0f} mm at END of the "
@@ -390,6 +501,11 @@ def calculate_repair(
         # End-of-life defect size: external Type A corrosion is sealed by
         # the repair (post-repair rate 0, current wall = end-of-life wall);
         # internal corrosion is projected forward at internal_corrosion_rate.
+    if defect_loc == "Internal" and defect_type in ("Corrosion", "Dent"):
+        compliance_warnings.append(
+            "Internal defect: designed via the Type B route (laminate sized "
+            "for the full design pressure; no substrate load sharing)."
+        )
     if defect_type == "Corrosion" and defect_loc == "Internal":
         if internal_corrosion_rate > 0:
             compliance_warnings.append(
@@ -436,6 +552,19 @@ def calculate_repair(
         "safety_factor": safety_factor,
         "temp_factor": temp_factor,
         "design_strain": design_strain,
+        "eps_a": eps_a,
+        "eps_a0": eps_a0,
+        "ft1": ft1,
+        "tmin_c": tmin_c,
+        "tmin_a": tmin_a,
+        "tdesign_base": tdesign_base,
+        "fth_stress": fth_stress,
+        "feq_n": feq,
+        "peq_mpa": peq,
+        "installation_temp": installation_temp,
+        "component_type": component_type,
+        "cyclic_derating_factor": cyclic_derating_factor,
+        "axial_load_case": axial_load_case,
         "pressure_mpa": pressure_mpa,
         "p_steel_capacity": p_steel_capacity,
         "p_composite_design": p_composite_design,
