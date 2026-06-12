@@ -6,6 +6,158 @@ from b31g import assess_b31g
 from iso24817_typea_class3 import TypeAClass3Inputs, calculate_type_a_class3
 from prowrap_materials import PROWRAP
 
+# Carbon-steel substrate CTE used in the ISO 24817 Formula (10)
+# thermal-mismatch term (same value as the rigorous module default).
+STEEL_CTE_PER_C = 12e-6
+
+# ISO 24817 Table 12 stress-concentration factors f_th by component type.
+COMPONENT_FTH = {
+    "": 1.0,
+    "STRAIGHT": 1.0,
+    "PIPE": 1.0,
+    "STRAIGHT PIPE": 1.0,
+    "BEND": 1.2,
+    "TEE": 2.0,
+    "FLANGE": 1.1,
+    "REDUCER": 1.1,
+}
+
+
+def baseline_component_factor(component_type):
+    key = (component_type or "Straight").strip().upper()
+    if key not in COMPONENT_FTH:
+        raise ValueError(
+            "Unknown component type. Use Straight, Bend, Tee, Flange, or Reducer."
+        )
+    return COMPONENT_FTH[key]
+
+
+def baseline_type_a_design(
+    od_mm,
+    nominal_wall_mm,
+    pressure_mpa,
+    substrate_pressure_mpa,
+    design_temp_c,
+    installation_temp_c,
+    design_life_years,
+    component_type="Straight",
+    cyclic_derating_factor=1.0,
+    axial_load_case=0,
+):
+    """ISO 24817 Type A laminate design for the baseline route (closed form).
+
+    Independent implementation of the same formulae as the rigorous
+    iso24817_typea_class3 module (kept separate so the two routes can be
+    cross-checked against each other):
+
+    - Formula (4):  pressure end-thrust Feq = pi/4 * p * D^2 when
+      axial_load_case == 1 (severed-pipe / above-ground); Feq = 0 for the
+      buried restrained case (axial_load_case == 0).
+    - Formula (11) performance route with the Formula (25) cyclic factor:
+      eps_c = fc * fperf * fT2 * eps_lt (PRW110 design-life data, Class 3).
+    - Formula (10): axial allowable strain with the installation-temperature
+      thermal-mismatch term, eps_a = fc * (fT1*eps_a0 - |dT*(alpha_s - alpha_a)|).
+    - Formula (5) hoop thickness (closed form, live pressure = 0) and the
+      axial minimum thickness, taking the larger.
+    - Table 12 component factor f_th (Bend 1.2, Tee 2.0, Flange/Reducer 1.1)
+      applied to the base thickness; Formula (33) tee pressure cap.
+    - 7.5.14 minimum thickness floor: greater of 2 layers or 2 mm.
+    - Formula (21) load-transfer overlap on the base thickness and eps_a.
+    """
+    fth = baseline_component_factor(component_type)
+    ec = PROWRAP["modulus_circ"]
+    ea = PROWRAP["modulus_axial"]
+    nu = PROWRAP["poisson_circ"]
+    ply = PROWRAP["ply_thickness"]
+    tau = PROWRAP["long_term_lap_shear"]
+    eps_lt = PROWRAP.get("long_term_strain_lcl", PROWRAP.get("long_term_strain_20y"))
+
+    fperf = 0.76 * 10 ** (-0.00273 * design_life_years)
+    # fT1 == fT2 here: Ttest == Tamb in the PRW110 qualification, so both
+    # Table 8 polynomials reduce to the same argument Tm - Td.
+    ft_delta = PROWRAP["max_temp"] - design_temp_c
+    ft = 0.0000625 * ft_delta**2 + 0.00125 * ft_delta + 0.7
+
+    # Formula (11) + Formula (25) cyclic derating.
+    eps_c = cyclic_derating_factor * fperf * ft * eps_lt
+
+    # Formula (10) axial allowable with installation-temperature mismatch.
+    if ea > 0.5 * ec:
+        eps_a0 = 0.003061 * 10 ** (-0.0044 * design_life_years)
+    else:
+        eps_a0 = 0.001
+    dt_install = design_temp_c - installation_temp_c
+    alpha_a = PROWRAP["thermal_expansion_axial"] * 1e-6
+    eps_a = cyclic_derating_factor * (
+        ft * eps_a0 - abs(dt_install * (STEEL_CTE_PER_C - alpha_a))
+    )
+
+    if eps_c <= 0:
+        raise ValueError("Calculated circumferential allowable strain is <= 0.")
+    if eps_a <= 0:
+        raise ValueError(
+            "Calculated axial allowable strain is <= 0 (installation-to-design "
+            "thermal mismatch and cyclic derating leave no axial strain margin)."
+        )
+
+    # Formula (4) end-thrust.
+    if axial_load_case == 1:
+        feq = pressure_mpa * math.pi * od_mm**2 / 4.0
+    else:
+        feq = 0.0
+
+    # Formula (5), closed form (live pressure = 0): hoop minimum thickness.
+    driving_load = pressure_mpa * od_mm / 2.0 + nu * feq / (math.pi * od_mm)
+    resisting_load = substrate_pressure_mpa * od_mm / 2.0
+    tmin_c = max(0.0, (driving_load - resisting_load) / (ec * eps_c))
+
+    # Axial minimum thickness.
+    tmin_a = max(
+        0.0,
+        (
+            feq / (math.pi * od_mm * ea)
+            - pressure_mpa * od_mm * nu / (2.0 * ec)
+        )
+        / eps_a,
+    )
+
+    tdesign_base = max(tmin_c, tmin_a)
+    tdesign = tdesign_base * fth
+
+    # Formula (33) tee pressure cap as a thickness requirement
+    # (branch diameter conservatively taken equal to D).
+    if (component_type or "").strip().upper() == "TEE":
+        t_required_tee = pressure_mpa * (od_mm + od_mm) / (2.0 * ec * eps_c)
+        tdesign = max(tdesign, t_required_tee)
+
+    # 7.5.14 minimum laminate thickness (Type A).
+    min_thickness_mm = max(2.0, 2.0 * ply)
+    tdesign_final = max(tdesign, min_thickness_mm)
+
+    # Formula (21) load transfer on the base (pre-f_th) thickness.
+    lmin_transfer = 3.0 * ea * eps_a * tdesign_base / tau
+
+    return {
+        "fperf": fperf,
+        "ft": ft,
+        "eps_lt": eps_lt,
+        "eps_c": eps_c,
+        "eps_a0": eps_a0,
+        "eps_a": eps_a,
+        "feq_n": feq,
+        "tmin_c_mm": tmin_c,
+        "tmin_a_mm": tmin_a,
+        "tdesign_base_mm": tdesign_base,
+        "fth_stress": fth,
+        "min_thickness_floor_mm": min_thickness_mm,
+        "tdesign_final_mm": tdesign_final,
+        "lmin_transfer_mm": lmin_transfer,
+        "installation_temp_c": installation_temp_c,
+        "component_type": component_type,
+        "cyclic_derating_factor": cyclic_derating_factor,
+        "axial_load_case": axial_load_case,
+    }
+
 
 def _validate_inputs(
     od,
@@ -150,12 +302,28 @@ def calculate_repair(
     design_life,
     force_3_layers=False,
     internal_corrosion_rate=0.0,
+    installation_temp=20.0,
+    component_type="Straight",
+    cyclic_derating_factor=1.0,
+    axial_load_case=0,
 ):
-    """Calculate repair outputs using the current legacy Streamlit formulas.
+    """Calculate repair outputs (baseline route).
 
     internal_corrosion_rate (mm/yr): post-repair growth of INTERNAL
     corrosion, used to project the remaining wall to end of design life.
     External Type A defects are sealed by the repair (rate = 0).
+
+    Routing: External corrosion/dent defects follow the Type A route
+    (load sharing); Internal defects and cracks/leaks follow the Type B
+    route (through-wall formulas, no substrate credit).
+
+    installation_temp (degC): repair installation temperature, used in the
+    ISO 24817 Formula (10) thermal-mismatch strain term.
+    component_type: Straight, Bend, Tee, Flange or Reducer (Table 12 f_th).
+    cyclic_derating_factor: ISO 24817 Formula (25) factor fc (0 < fc <= 1).
+    axial_load_case: 0 = buried restrained pipeline (no axial load);
+    1 = severed-pipe/guillotine credible or above-ground pipeline
+    (Formula 4 pressure end-thrust).
     """
     _validate_inputs(
         od,
@@ -170,6 +338,12 @@ def calculate_repair(
     )
     if internal_corrosion_rate < 0:
         raise ValueError("Internal corrosion rate cannot be negative.")
+    if not 0 < cyclic_derating_factor <= 1:
+        raise ValueError(
+            "Cyclic derating factor must be greater than zero and less than "
+            "or equal to 1."
+        )
+    baseline_component_factor(component_type)  # validates component type
 
     wall_loss_ratio = (wall - rem_wall) / wall
 
@@ -182,53 +356,51 @@ def calculate_repair(
         rem_wall_eol = rem_wall
     has_no_substrate_capacity = rem_wall_eol < 1.0
 
-    calc_method_thick = "Type B (Total Replacement)"
-    calc_method_overlap = "Type B (Shear Controlled)"
-
-    if defect_type == "Corrosion":
-        if not has_no_substrate_capacity:
-            calc_method_thick = "Type A (Load Sharing)"
-            calc_method_overlap = "Type A (Geometry Controlled)"
-        else:
-            calc_method_thick = "Type B (Total Replacement)"
-            calc_method_overlap = "Type B (Shear Controlled)"
-    elif defect_type == "Dent":
-        calc_method_thick = "Type A (Dent Reinforcement)"
-        calc_method_overlap = "Type B (Shear Controlled)"
-    elif defect_type in ["Leak", "Crack"]:
+    # Routing: External + Corrosion/Dent -> Type A (defect sealed by the
+    # repair, substrate shares load). Internal defects, cracks and leaks
+    # -> Type B (through-wall route, no substrate credit). External
+    # corrosion projected below 1 mm also falls through to Type B.
+    is_type_b = (
+        defect_loc == "Internal"
+        or defect_type in ["Leak", "Crack"]
+        or has_no_substrate_capacity
+    )
+    if is_type_b:
         calc_method_thick = "Type B (Total Replacement)"
         calc_method_overlap = "Type B (Shear Controlled)"
+    elif defect_type == "Dent":
+        calc_method_thick = "Type A (Dent Reinforcement)"
+        calc_method_overlap = "Type A (Geometry Controlled)"
+    else:
+        calc_method_thick = "Type A (Load Sharing)"
+        calc_method_overlap = "Type A (Geometry Controlled)"
 
     safety_factor = 1.0 / design_factor
 
     # ISO 24817 allowable strain, 7.5.6 performance route (Formula 11):
-    # eps_c = fperf * fT2 * eps_lt, with Class 3 design-life-data fperf
-    # (Table 10) and the Table 8 polynomial for fT2 (Ttest == Tamb in the
-    # PRW110 qualification, so the argument reduces to Tm - Td).
+    # eps_c = fc * fperf * fT2 * eps_lt, with Class 3 design-life-data fperf
+    # (Table 10), the Table 8 polynomial for fT2 (Ttest == Tamb in the
+    # PRW110 qualification, so the argument reduces to Tm - Td) and the
+    # Formula (25) cyclic derating factor fc.
     eps_lt = PROWRAP.get("long_term_strain_lcl", PROWRAP.get("long_term_strain_20y"))
     fperf = 0.76 * 10 ** (-0.00273 * design_life)
     ft2_delta = PROWRAP["max_temp"] - temp
     temp_factor = 0.0000625 * ft2_delta**2 + 0.00125 * ft2_delta + 0.7
-    design_strain = fperf * temp_factor * eps_lt
+    design_strain = cyclic_derating_factor * fperf * temp_factor * eps_lt
 
     pressure_mpa = pressure * 0.1
 
     # Substrate MAWP (p_s) from an ASME B31G-2023 Level 1 (Modified)
-    # defect assessment, as ISO 24817 requires - replaces the previous
-    # Barlow estimate on the remaining wall.
+    # defect assessment, as ISO 24817 requires. B31G covers blunt metal
+    # loss only; the assessment is run for corrosion defects for
+    # information, but PRESSURE CREDIT is only taken on the Type A route
+    # (external corrosion sealed by the repair). Type B (internal, crack,
+    # leak, < 1 mm projected wall) takes no substrate credit.
     b31g_details = None
-    if (
-        defect_type in ["Leak", "Crack"]
-        or defect_type == "Dent"
-        or has_no_substrate_capacity
-    ):
-        # Cracks/leaks are crack-like (outside B31G scope); dents are not
-        # blunt metal loss; < 1 mm projected wall gets no credit.
-        p_steel_capacity = 0.0
-    else:
-        # B31G covers internal and external blunt metal loss. The depth is
-        # taken at END of design life (internal corrosion projected at the
-        # given rate; external sealed by the repair).
+    p_steel_capacity = 0.0
+    if defect_type == "Corrosion" and not has_no_substrate_capacity:
+        # Depth is taken at END of design life (internal corrosion
+        # projected at the given rate; external sealed by the repair).
         b31g_details = assess_b31g(
             od_mm=od,
             wall_mm=wall,
@@ -239,18 +411,36 @@ def calculate_repair(
             method="modified",
             operating_pressure_mpa=pressure_mpa,
         )
-        if b31g_details["applicable"]:
+        # d/t > 0.80: beyond B31G - no Level 1 substrate credit.
+        if "Type A" in calc_method_thick and b31g_details["applicable"]:
             p_steel_capacity = b31g_details["p_s_mpa"]
-        else:
-            # d/t > 0.80: beyond B31G - no Level 1 substrate credit.
-            p_steel_capacity = 0.0
 
     if "Type A" in calc_method_thick and p_steel_capacity > 0:
         p_composite_design = max(0, pressure_mpa - p_steel_capacity)
     else:
         p_composite_design = pressure_mpa
 
-    if p_composite_design > 0:
+    # Thickness:
+    # - Type A route: full ISO 24817 Type A design (Formulae 4/5/10/11/25,
+    #   Table 12 f_th, Formula 33 tee cap, 7.5.14 floor).
+    # - Type B route: hoop Type A equation at full pressure (the 7.5.7
+    #   cross-check), combined below with Formula (12).
+    typea_design = None
+    if "Type A" in calc_method_thick:
+        typea_design = baseline_type_a_design(
+            od_mm=od,
+            nominal_wall_mm=wall,
+            pressure_mpa=pressure_mpa,
+            substrate_pressure_mpa=p_steel_capacity,
+            design_temp_c=temp,
+            installation_temp_c=installation_temp,
+            design_life_years=design_life,
+            component_type=component_type,
+            cyclic_derating_factor=cyclic_derating_factor,
+            axial_load_case=axial_load_case,
+        )
+        t_required = typea_design["tdesign_final_mm"]
+    elif p_composite_design > 0:
         t_required = (
             p_composite_design * od
         ) / (2 * PROWRAP["modulus_circ"] * design_strain)
@@ -300,13 +490,16 @@ def calculate_repair(
     # Formula (18) geometric overlap 2*sqrt(D*t), never less than 50 mm,
     # plus the Formula (21) load-transfer check 3*Ea*eps_a*t/tau.
     overlap_geometric = 2.0 * math.sqrt(od * wall)
-    overlap_transfer = (
-        3.0 * PROWRAP["modulus_axial"] * design_strain * final_thickness
-    ) / PROWRAP["long_term_lap_shear"]
-    if "Type A" in calc_method_overlap:
+    if typea_design is not None:
+        # Formula (21) on the base (pre-f_th) thickness with the axial
+        # allowable strain eps_a (thermal mismatch + cyclic included).
+        overlap_transfer = typea_design["lmin_transfer_mm"]
         overlap_shear_basis = "iso_formula_18_and_21"
         overlap_shear_strength = PROWRAP["long_term_lap_shear"]
     else:
+        overlap_transfer = (
+            3.0 * PROWRAP["modulus_axial"] * design_strain * final_thickness
+        ) / PROWRAP["long_term_lap_shear"]
         overlap_shear_basis = "iso_formula_18_and_21_type_b"
         overlap_shear_strength = PROWRAP["long_term_lap_shear"]
     overlap_length = max(50.0, overlap_geometric, overlap_transfer)
@@ -406,6 +599,13 @@ def calculate_repair(
                 "repair. Enter a corrosion rate so the remaining wall can "
                 "be projected to the end of the design life (ISO 24817 7.3)."
             )
+    if is_type_b and axial_load_case == 1:
+        compliance_warnings.append(
+            "Axial load case 1 (Formula 4 end-thrust) selected with a Type B "
+            "defect: the Formula 12 through-wall design does not include "
+            "axial loads. An engineered assessment of the axial load path "
+            "is required for severed-pipe / above-ground Type B repairs."
+        )
     thickness_check_ok = final_thickness < od / 12.0
     if not thickness_check_ok:
         compliance_warnings.append(
@@ -451,6 +651,11 @@ def calculate_repair(
         "overlap_shear_strength": overlap_shear_strength,
         "eps_lt": eps_lt,
         "fperf": fperf,
+        "installation_temp": installation_temp,
+        "component_type": component_type,
+        "cyclic_derating_factor": cyclic_derating_factor,
+        "axial_load_case": axial_load_case,
+        "typea_design": typea_design,
         "type_b_details": type_b_details,
         "b31g_details": b31g_details,
         "thickness_check_ok": thickness_check_ok,

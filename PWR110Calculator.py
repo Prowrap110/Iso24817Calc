@@ -170,6 +170,10 @@ def run_calculation(
             design_life,
             force_3_layers=st.session_state.force_3_layers,
             internal_corrosion_rate=internal_corrosion_rate,
+            installation_temp=installation_temp,
+            component_type=component_type,
+            cyclic_derating_factor=cyclic_derating_factor,
+            axial_load_case=axial_load_case,
         )
     except ValueError as exc:
         for err in str(exc).splitlines():
@@ -437,9 +441,10 @@ def main():
         design_life = st.sidebar.number_input("Design Life [years]", value=20, min_value=1, on_change=reset_calc)
         df = st.sidebar.number_input("Design Factor (f)", value=0.72, min_value=0.1, max_value=1.0, on_change=reset_calc)
 
-        st.sidebar.header("6. ISO Type A / Class 3 Check")
+        st.sidebar.header("6. Installation & Load Conditions")
+        st.sidebar.caption("These inputs feed the baseline design (thermal mismatch, component factor f_th, cyclic derating, Formula 4 axial loads) and the ISO Type A / Class 3 check.")
         show_typea_class3_check = st.sidebar.checkbox("Show Type A / Class 3 check", value=True, on_change=reset_calc)
-        st.sidebar.caption("For external non-crack/non-leak defects, substrate credit is automatically taken from effective pipe capacity.")
+        st.sidebar.caption("For external corrosion/dent defects, substrate credit is automatically taken from effective pipe capacity.")
         installation_temp = st.sidebar.number_input("Installation temperature [°C]", value=20.0, on_change=reset_calc)
         component_type = st.sidebar.selectbox("Component type", ["Straight", "Bend", "Tee", "Flange", "Reducer"], on_change=reset_calc)
         cyclic_derating_factor = st.sidebar.number_input("Cyclic derating factor", value=1.0, min_value=0.01, max_value=1.0, on_change=reset_calc)

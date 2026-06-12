@@ -205,15 +205,15 @@ class TypeAClass3AdapterTest(unittest.TestCase):
             rem_wall=4.5, yield_strength=359.0, design_factor=0.72,
             design_life=20,
         )
-        # Stays above 1 mm at end of life -> Type A with B31G credit at the
-        # projected (deeper) defect.
+        # Internal defects follow the Type B route (no substrate pressure
+        # credit); the wall is still projected to end of life and the B31G
+        # assessment is retained for information.
         r = calculate_repair(**base, internal_corrosion_rate=0.1)
         self.assertAlmostEqual(r["rem_wall_eol"], 2.5)
-        self.assertEqual(r["calc_method_thick"], "Type A (Load Sharing)")
-        self.assertGreater(r["p_steel_capacity"], 0.0)
-        self.assertLess(
-            r["p_steel_capacity"], 9.951873620726573
-        )  # less credit than the external case at current wall
+        self.assertEqual(r["calc_method_thick"], "Type B (Total Replacement)")
+        self.assertAlmostEqual(r["p_steel_capacity"], 0.0)
+        self.assertEqual(substrate_credit_bar_for_iso_check(r), 0.0)
+        self.assertIsNotNone(r["b31g_details"])
 
         # Projected below 1 mm -> Type B, no substrate credit.
         r2 = calculate_repair(**base, internal_corrosion_rate=0.2)

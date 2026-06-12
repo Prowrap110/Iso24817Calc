@@ -35,7 +35,10 @@ class CurrentCalculationBaselineTest(unittest.TestCase):
         # Substrate MAWP from ASME B31G-2023 Level 1 (Modified), SF = 1/0.72.
         self.assertAlmostEqual(result["p_steel_capacity"], 9.951873620726573)
         self.assertAlmostEqual(result["p_composite_design"], 0.0)
-        self.assertAlmostEqual(result["t_required"], 0.0)
+        # No structural thickness required (substrate covers the pressure);
+        # t_required reports the 7.5.14 minimum-thickness floor of 2 mm.
+        self.assertAlmostEqual(result["typea_design"]["tdesign_base_mm"], 0.0)
+        self.assertAlmostEqual(result["t_required"], 2.0)
         # ISO 7.5.14 minimum thickness: greater of 2 layers or 2 mm -> 3 plies.
         self.assertEqual(result["num_plies"], 3)
         self.assertAlmostEqual(result["final_thickness"], 2.49)
